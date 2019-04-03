@@ -1,0 +1,3341 @@
+---
+title: "Chamberlain App Data Analysis"
+author: "Outside of the Garage"
+date: "3/17/2019"
+output:
+ rmdformats::readthedown:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    code_folding: show
+    highlight: tango
+---
+#  A. TSC Call Volume/App Release Analysis
+## 1. Description of Methodology--Data Visualizations
+For this part of the analysis, we used basic descriptive analytics techniques and data visualizations to explore the relationship between the call volume and the app releases. Our data cleaning process is described below:
+
+### 1.1 Data Cleaning
+Chamberlain has provided us four different set of data, including the TSC data, App Release date, User volume, and App Reviews. The first three datasets should be joined together so that we can normalize the call volume and compare the call volume after a new app version is released. The main tasks of the data cleaning process include combining the factor levels, aggregating the data, joining different dataset, normalizing call volume by the number of users, and visualization.
+
+During our last client meeting, the representatives from Chamberlain mentioned they are only interested in their GDO (garage door opener) , CDO (commercial door opener ), and smart garage hub products. So, the first thing we did with our data is to sort out the observations related to these three products. Since CDO only has 122 total observations, we will not be able to derive any useful insights by visualizing the data. Therefore, we decided to disregard the data related to CDO. We then partitioned the TSC data related to GDO and Smart garage hub products based on whether the products can be connected to wifi or not. Chamberlain mentioned that every row in the TSC that has “Wi-Fi” or “MyQ” in the Material Name column can be connected to wifi.  We decided to visualize data related to connectable and unconnectable devices separately because Chamberlain mentioned they would like to compare the call volume between the two major categories of devices. For each category of devices, we partitioned the data further according to the Resolution column.  We decided to further classify the dataset by the type of issues because we believe some kinds of issues may be unrelated to app releases (i.e. hardware malfunctioning is probably not related to whether a new app version being released or not).  How we partitioned the TSC data is shown below.
+
+![Fig 1. Data cleaning structure](/Users/ruoningwang/Downloads/Miami University Analytics Practicum Deliverables/Strc.png)
+
+For each subcategory, we first collasped the factor levels (i.e. hardware issue has too many different values, we grouped the different subcategoreis of problems according to where the problem occured. If it is the door that is mafunctioning, we will say this is a door problem.), aggregated the call volume by weeks using xts operations, normalized the call volume by number of users after joining the datasets together, and finally created interactive visualizations. The detailed steps and codes of our data cleaning process is included in our HTML/PDF process book.
+
+### 1.2 Data Visualizations Related to Wifi-Connectable Devices
+Our final data visuals are listed below:
+
+#### WI-FI Connectable Devices {.tabset}
+
+##### MYQ Setup (Android)
+```{r,warning=FALSE,message=FALSE,out.width="110%",out.height="100%",fig.align="right"}
+library(rmdformats)
+library(readxl)
+library(lubridate)
+TSC1 <- read_excel("TSC_MAR_DEC_2017.xlsx")
+TSC1 <- TSC1[,-1]
+TSC2 <- read_excel("TSC_JAN_JUN_2018.xlsx")
+TSC2 <- TSC2[,-1]
+TSC3 <- read_excel("TSC_JUL_DEC_2018.xlsx")
+TSC3 <- TSC3[,-1]
+TSC <- rbind(TSC1,TSC2,TSC3)
+rm(TSC1,TSC2,TSC3)
+TSC <- TSC[order(TSC$`Date/Time Opened`),]
+TSC$`Date/Time Opened` <- force_tz(TSC$`Date/Time Opened`,
+                                   tzone="America/New_York")
+i <- c(3:7)
+TSC[i] <- lapply(TSC[i],tolower)
+index <- grep("gdo|cdo|smart garage|gd",TSC$`Material Name`)
+TSC <- TSC[index,]
+index <- grep("myq|wifi|wi-fi|smartphone",TSC$`Material Name`)
+TSC_conn <- TSC[index,]
+TSC_unconn_gdo <-   TSC[-index,]
+index <- grep("cdo",TSC_conn$`Material Name`)
+TSC_cdo <- TSC_conn[index,]
+TSC_conn_gdo <-  TSC_conn [-index,]
+rm(TSC,TSC_conn)
+gdo_myqsetup <- TSC_conn_gdo[which(TSC_conn_gdo$Issue=="myq setup"),]
+gdo_myqsetup$Category <- gsub("\\-.*","",gdo_myqsetup$Resolution)
+gdo_myqsetup$Category[grep("^link to|^need assistance",
+                           gdo_myqsetup$Category)] <- "link to other device"
+library(dplyr)
+gdo_myqsetup$`Date/Time Opened` <- date(gdo_myqsetup$`Date/Time Opened`)
+myqsetup <- gdo_myqsetup %>% 
+  group_by(`Date/Time Opened`,Category) %>% 
+  summarize(CallVolume=n())
+library(xts)
+myqsetup$Category <- as.factor(as.character(myqsetup$Category))
+cat <- unlist(unique(myqsetup$Category))
+ms_0 <- {}
+for (i in 1:length(cat)) {
+  ms <- myqsetup[which(myqsetup$Category==cat[i]),]
+  ms <- xts(x=ms[,-1],order.by=ms$`Date/Time Opened`)
+  ms <- merge(ms,zoo(NULL,seq(as.Date("2017/03/10"),
+                              as.Date("2018/12/09"),by="day")),all=TRUE)
+  ms$CallVolume[which(is.na(ms$CallVolume))] <-0
+  ep <- endpoints(ms, on = "weeks")
+  ms <- period.sum(ms[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ms)
+  index <- index(ms)
+  ms <- data.frame(date=index,CallVolume=cr)
+  ms$Category <- cat[i]
+  assign(paste("ms",i,sep="_"),rbind(get(paste("ms",i-1,sep="_")),ms))
+}
+myqsetup_big <- ms_11
+myqsetup_big$Category <- as.character(myqsetup_big$Category)
+myqsetup_big$Category[which(myqsetup_big$Category 
+                            %in% c("security settings ","na",
+                                   "door sensor ", "alerts and notifications ",
+                                   "internet gateway ","touch id ",
+                                   "link to other device",
+                                   "myq garage hub "))] <- "Other Issues"
+myqsetup_big$Category <- as.factor(myqsetup_big$Category)
+myqsetup_big <- myqsetup_big %>% group_by(Category,date) %>% 
+  summarize(CallVolume=sum(CallVolume))
+myqsetup_big <- myqsetup_big[c(2,3,1)]
+myqsetup_big$Category <- as.character(myqsetup_big$Category)
+apprel <- read_excel("AppReleaseDates.xlsx",sheet=2)
+apprel <- apprel[38:67,1:3]
+android <- apprel[,1:2]
+android <- na.omit(android)
+android$`Android Release Date` <- as.numeric(android$`Android Release Date`)
+android$`Android Release Date` <- as.Date(android$`Android Release Date`,origin="1899-12-30")
+colnames(android) <- c("version","dates")
+ios <- apprel[,c(1,3)]
+ios <- na.omit(ios)
+ios$`iOS Release Date` <- as.Date(ios$`iOS Release Date`)
+colnames(ios) <- c("version","dates")
+users <- read_excel("Connected Accounts Added by Month.xlsx")
+users <- users[-c(1,2,26,27),]
+users$id <- c(1:nrow(users))
+colnames(users) <- c("Month","Count","id")
+us2 <- data.frame(Month=NA, Count=NA, id=c(1:nrow(users)))
+us2 <- rbind(us2,us2,us2)
+users <- rbind(users,us2)
+users <- users[order(users$id),]
+users <- users[-c(90,91,92),]
+wks <- c(as.Date("2017-03-05"),unique(myqsetup_big$date),
+         as.Date("2018-12-16"),as.Date("2018-12-23"),as.Date("2018-12-30"),
+         as.Date("2019-01-06"))
+us3 <- data.frame(Month=NA, Count=NA, id=c(2,5,8,10,14,17,19,22))
+users <- rbind(users,us3)
+users <- users[order(users$id),]
+users$Month <- wks
+ct_0 <- users[1,]
+for (i in 1:(length(unique(users$id))-1)) {
+  ct <- users[c(which(users$id==i),max(which(users$id==i))+1),]
+  for (k in 2:nrow(ct)-1){
+    ct$Count[k] <- round((ct$Count[1]+(ct$Count[nrow(ct)]-ct$Count[1])*(1/(nrow(ct)-1))*(k-1)),0)
+  }
+  assign(paste("ct",i,sep="_"),rbind(get(paste("ct",i-1,sep="_")),ct[-1,]))
+}
+users <- ct_22[-c(1,94:97),c(1:2)]
+options(scipen=999)
+library(ggplot2)
+myqsetup_big$users <-rep(users$Count,4)
+myqsetup_big$CallVolumePerc <- myqsetup_big$CallVolume/myqsetup_big$users
+myqsetuogr_and <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=myqsetup_big)+
+  geom_vline(aes(xintercept=as.numeric(android$dates[-18])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("MyQ Account","MyQ Device", 
+                               "MyQ Serial Number","Other Issues"),
+                      values=c("#dd8716","#dd3e1f",
+                               "#1053b2","grey70"))+
+  scale_y_continuous(limits=c(0,0.00017),breaks=seq(0,0.00017,0.00005),
+                     labels=paste0(seq(0,0.017,0.005),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+library(plotly)
+a <- list(
+  x= as.numeric(android$dates[-c(8,18)])-5,
+  y = 0.00017,
+  text = android$version[-c(8,18)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 11,
+  color = 'darkgreen')
+
+myqsetupigraph_and <- ggplotly(myqsetuogr_and) %>% layout(
+  title="Call Volume By Date--MyQ Setup.High Frequency Issues (Android)",
+         annotations=a,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.2),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 5) %>%
+  style(hovertext = paste("Date:",myqsetup_big$date[1:92],
+                          "<br> Users:", myqsetup_big$users[1:92], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[1:92], 
+                          "<br> Category:", myqsetup_big$Category)[1:92],
+        textposition = "auto",traces=1) %>%
+   style(hovertext = paste("Date:",myqsetup_big$date[93:184],
+                          "<br> Users:", myqsetup_big$users[93:184], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[93:184], 
+                          "<br> Category:", myqsetup_big$Category)[93:184],
+        textposition = "auto",traces=2) %>%
+   style(hovertext = paste("Date:",myqsetup_big$date[185:276],
+                          "<br> Users:", myqsetup_big$users[185:276], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[185:276], 
+                          "<br> Category:", myqsetup_big$Category)[185:276],
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",myqsetup_big$date[277:368],
+                          "<br> Users:", myqsetup_big$users[277:368], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[277:368], 
+                          "<br> Category:", myqsetup_big$Category)[277:368],
+        textposition = "auto",traces=4) %>%
+add_annotations(yref='paper',xref="paper",
+                y=-0.28,x=0.2, text="Issues",showarrow=F) 
+myqsetupigraph_and
+```
+
+\  
+
+##### MyQ Setup (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+myqsetuogr_ios <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=myqsetup_big)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("MyQ Account","MyQ Device", 
+                               "MyQ Serial Number","Other Issues"),values=c("#dd8716","#dd3e1f","#1053b2","grey70"))+
+  scale_y_continuous(limits=c(0,0.00017),breaks=seq(0,0.00017,0.00005),
+                     labels=paste0(seq(0,0.017,0.005),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(ios$dates[-c(13,14,21,23)])-5,
+  y = 0.00017,
+  text = ios$version[-c(13,14,21,23)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+myqsetupigraph_ios <- ggplotly(myqsetuogr_ios) %>% layout(
+  title="Call Volume By Date--MyQ Setup.High Frequency Issues (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.23),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 5) %>%
+  style(hovertext = paste("Date:",myqsetup_big$date[1:92],
+                          "<br> Users:", myqsetup_big$users[1:92], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[1:92], 
+                          "<br> Category:", myqsetup_big$Category)[1:92],
+        textposition = "auto",traces=1) %>%
+   style(hovertext = paste("Date:",myqsetup_big$date[93:184],
+                          "<br> Users:", myqsetup_big$users[93:184], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[93:184], 
+                          "<br> Category:", myqsetup_big$Category)[93:184],
+        textposition = "auto",traces=2) %>%
+   style(hovertext = paste("Date:",myqsetup_big$date[185:276],
+                          "<br> Users:", myqsetup_big$users[185:276], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[185:276], 
+                          "<br> Category:", myqsetup_big$Category)[185:276],
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",myqsetup_big$date[277:368],
+                          "<br> Users:", myqsetup_big$users[277:368], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[277:368], 
+                          "<br> Category:", myqsetup_big$Category)[277:368],
+        textposition = "auto",traces=4) %>%
+add_annotations(yref='paper',xref="paper",
+                y=-0.31,x=0.15, text="Issues",showarrow=F) 
+myqsetupigraph_ios
+```
+
+\  
+
+##### Hardware Malfunctioning (Android)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+gdo_notwork <- TSC_conn_gdo[which(TSC_conn_gdo$Issue=="does not work as expected"),]
+gdo_notwork$Category <- gsub("\\-.*","",gdo_notwork$Resolution)
+gdo_notwork$Category <- 
+  recode_factor(gdo_notwork$Category, 
+                                      "accessory defective "
+                ="door control",
+                                      "battery backup is dead/low "
+                ="opener hardware",
+                                      "break or short in door control wiring"
+                ="door control",
+                                      "break or short in wiring"
+                ="opener hardware",
+                                      "chain or belt is too loose or too tight"
+                ="opener hardware",
+                                      "chain, belt or rack failed "
+                ="opener hardware", 
+                                      "defective door control "
+                ="door control", 
+                                      "door control failed"
+                ="door control",
+                "door control flashing "="door control")
+gdo_notwork$Category <- 
+  recode_factor(gdo_notwork$Category, 
+                "door control malfunctioned or failed"
+                ="door control",
+                                      "door does not have proper reinforcement"
+                ="door/locks",
+                                      "door lock engaged "
+                ="door/locks",
+                "door out of balance, broken spring "
+                ="door/locks",
+                                      "door too heavy/binding"
+                ="door/locks",
+                "force are too high"="door/locks",
+                 "gap in end panel to cover"
+                ="opener hardware",
+                "gear and sprocket worn or broken"
+                ="opener hardware",
+                                      "gears stripped "
+                ="opener hardware",
+                "hanging brackets are loose or incorrectly installed"
+                ="opener hardware",
+                                      "ac gdo capacitor failed "
+                ="opener hardware",
+                "light bulb burned out"
+                ="opener hardware",
+                                      "light feature is turned on"
+                ="opener hardware")
+gdo_notwork$Category <- 
+  recode_factor(gdo_notwork$Category, 
+                                     
+                "light socket failed"="opener hardware",
+                                      "light socket tabs compressed"
+                ="opener hardware",
+                "lights stay on too long"="opener hardware",
+                                      "limit switch assembly failed "
+                ="door/locks",
+                "limits and forces not programmed "
+                ="door/locks",
+                                      "manual disconnect not engaged "
+                ="door/locks",
+                "manual release not engaged "
+                ="door/locks",
+                                      "neighbors remote programmed to unit" 
+                ="other issues",
+                "no other access to garage"="door control",
+                                      "safety sensors failed"
+                ="sensors", 
+                "safety sensors are out of alignment"="sensors")
+gdo_notwork$Category <- 
+  recode_factor(gdo_notwork$Category, 
+                                      "logic board failed"="logic board",
+                "travel not set "="door/locks", 
+                "remote failed"="door control",
+                 "logic board failed "="logic board",
+                "recent power outage" ="other issues", 
+                "no power to outlet gfi/breaker"="other issues",
+                "opener out of adjustment "="opener hardware",
+                 "only runs on battery backup"="other issues",
+                "travel module failed "="opener hardware",
+                 "rpm sensor failed "="opener hardware",
+                "remote light failed"="door control", 
+                 "safety sensors are obstructed"="sensors",
+                "using incorrect object to test system"="other issues",
+                "safety sensors mounted incorrectly"="sensors",
+                "sunlight interference"="other issues",
+                "rpm sensor not seated properly "="opener hardware",
+                "rollers and hinges need to be lubricated"="door/locks",
+                                      "motor failed "="opener hardware",
+                "motion sensor door controls are too close"= "sensors", 
+                "travel module harness disconnected"="opener hardware",
+                "trolley stuck on stop bolt "="opener hardware",
+        "rjo cable tension monitor improperly installed"="sensors",
+        "test safety reversal/protector system not working"="sensors",
+"smoke detector or other device is beeping not the opener "="other issues",
+"security +2.0 activitating pre '93 opener"= "opener hardware")
+
+gdo_notwork$Category <- 
+  recode_factor(gdo_notwork$Category, 
+
+                                       "short in wiring "="opener hardware",
+                "motor vibration heard in ceiling or house "="opener hardware",
+                                      "motor bushings failed "="opener hardware",
+                "motor overheated"="opener hardware",
+                                      "transformer failed "="opener hardware",
+                "rjo cable tension monitor failed "="sensors",
+                 "too much exposed wire, wired shorting to soder"=
+                  "opener hardware", 
+                 "remote/keyless entry failed or defective "=
+                  "door control",
+                  "remote light is too far from rjo or interference"=
+                  "door control",
+                 "rjo set screws in collar are loose "=
+                  "opener hardware",
+                 "rjo internal set screws loose "=
+                  "opener hardware"
+                                      )
+gdo_notwork$Category <- as.character(gdo_notwork$Category)
+gdo_notwork$Category[which(gdo_notwork$Category=="na")] <-
+  gdo_notwork$`Issue Detail`[which(gdo_notwork$Category=="na")] 
+gdo_notwork$Category <- recode_factor(gdo_notwork$Category,
+"can't access garage"="door control",
+"door does not close"="door/locks",
+"door does not open"="door/locks",
+ "door does not reverse as designed"="door/locks",
+"door hits the ground and reverses"="door/locks",
+"door runs on its own"="door/locks",
+"garage door monitor does not work"="sensors",
+"lights do not come on"="opener hardware",
+"lights flash 10 times"="opener hardware",
+ "lights stay on"="opener hardware",
+"motor hums door won't move"="opener hardware",
+ "opener dead or 2 clicks"="opener hardware",
+"opener is beeping"="opener hardware",
+"opener is noisy or vibrates"="opener hardware")
+gdo_notwork$Category <- recode_factor(gdo_notwork$Category,
+"door control"="door control/sensors","sensors"="door control/sensors")
+gdo_notwork$`Date/Time Opened` <- date(gdo_notwork$`Date/Time Opened`)
+notwork <- gdo_notwork %>% group_by(`Date/Time Opened`,Category) %>% 
+  summarize(CallVolume=n())
+notwork$Category <- as.factor(as.character(notwork$Category))
+cat <- unlist(unique(notwork$Category))
+ns_0 <- {}
+for (i in 1:length(cat)) {
+  ns <- notwork[which(notwork$Category==cat[i]),]
+  ns <- xts(x=ns[,-1],order.by=ns$`Date/Time Opened`)
+  ns <- merge(ns,zoo(NULL,seq(as.Date("2017/03/10"),
+                              as.Date("2018/12/09"),by="day"))
+              ,all=TRUE)
+  ns$CallVolume[which(is.na(ns$CallVolume))] <-0
+  ep <- endpoints(ns, on = "weeks")
+  ns <- period.sum(ns[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ns)
+  index <- index(ns)
+  ns <- data.frame(date=index,CallVolume=cr)
+  ns$Category <- cat[i]
+  assign(paste("ns",i,sep="_"),
+         rbind(get(paste("ns",i-1,sep="_")),ns))
+}
+rm(ns_1,ns_2,ns_3,ns_4,ns,ns_0)
+notwork <- ns_5
+notwork$users <-rep(users$Count,5)
+notwork$CallVolumePerc <- 
+  notwork$CallVolume/notwork$users
+notwork_and <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=notwork)+
+  geom_vline(aes(xintercept=as.numeric(android$dates[-18])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Door Control & Sensors",
+                               "Door Problems", 
+                               "Logic Board",
+                               "Opener Hardware",
+                               "Other Issues (Human Error)"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                               "#067a38","grey70"))+
+  scale_y_continuous(limits=c(0,0.00008),breaks=seq(0,0.00008,0.00002),
+                     labels=paste0(seq(0,0.008,0.002),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+a <- list(
+  x= as.numeric(android$dates[-c(8,18)])-5,
+  y = 0.00008,
+  text = android$version[-c(8,18)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 11,
+  color = 'darkgreen')
+
+notworkpl_and <- ggplotly(notwork_and) %>% layout(
+  title="Call Volume By Date--Hardware Malfunctioning Issues (Android)",
+         annotations=a,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.23),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 6) %>%
+  style(hovertext = paste("Date:",notwork$date[1:92],
+                          "<br> Users:", notwork$users[1:92], 
+                          "<br> Call Volume:", notwork$CallVolume[1:92], 
+                          "<br> Category:", notwork$Category)[1:92],
+        textposition = "auto",traces=2) %>%
+  style(hovertext = paste("Date:",notwork$date[93:184],
+                          "<br> Users:", notwork$users[93:184], 
+                          "<br> Call Volume:", notwork$CallVolume[93:184], 
+                          "<br> Category:", notwork$Category)[93:184],
+        textposition = "auto",traces=1) %>%
+  style(hovertext = paste("Date:",notwork$date[185:276],
+                          "<br> Users:", notwork$users[185:276], 
+                          "<br> Call Volume:", notwork$CallVolume[185:276], 
+                          "<br> Category:", notwork$Category)[185:276],
+        textposition = "auto",traces=5) %>%
+  style(hovertext = paste("Date:",notwork$date[277:368],
+                          "<br> Users:", notwork$users[277:368], 
+                          "<br> Call Volume:", notwork$CallVolume[277:368], 
+                          "<br> Category:", notwork$Category)[277:368],
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",notwork$date[369:460],
+                          "<br> Users:", notwork$users[369:460], 
+                          "<br> Call Volume:", notwork$CallVolume[369:460], 
+                          "<br> Category:", notwork$Category)[369:460],
+        textposition = "auto",traces=4) %>%
+add_annotations(yref='paper',xref="paper",
+                y=-0.31,x=0.1, text="Issues",showarrow=F) 
+notworkpl_and
+```
+
+##### Hardware Malfunctioning (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+notwork_ios <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=notwork)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Door Control & Sensors",
+                               "Door Problems", 
+                               "Logic Board",
+                               "Opener Hardware",
+                               "Other Issues (Human Error)"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                               "#067a38","grey70"))+
+  scale_y_continuous(limits=c(0,0.00008),breaks=seq(0,0.00008,0.00002),
+                     labels=paste0(seq(0,0.008,0.002),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(ios$dates[-c(13,14,21,23)])-5,
+  y = 0.00008,
+  text =ios$version[-c(13,14,21,23)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 11,
+  color = 'darkgreen')
+
+notworkpl_ios <- ggplotly(notwork_ios) %>% layout(
+  title="Call Volume By Date--Hardware Malfunctioning Issues (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.23),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 6) %>%
+  style(hovertext = paste("Date:",notwork$date[1:92],
+                          "<br> Users:", notwork$users[1:92], 
+                          "<br> Call Volume:", notwork$CallVolume[1:92], 
+                          "<br> Category:", notwork$Category)[1:92],
+        textposition = "auto",traces=2) %>%
+  style(hovertext = paste("Date:",notwork$date[93:184],
+                          "<br> Users:", notwork$users[93:184], 
+                          "<br> Call Volume:", notwork$CallVolume[93:184], 
+                          "<br> Category:", notwork$Category)[93:184],
+        textposition = "auto",traces=1) %>%
+  style(hovertext = paste("Date:",notwork$date[185:276],
+                          "<br> Users:", notwork$users[185:276], 
+                          "<br> Call Volume:", notwork$CallVolume[185:276], 
+                          "<br> Category:", notwork$Category)[185:276],
+        textposition = "auto",traces=5) %>%
+  style(hovertext = paste("Date:",notwork$date[277:368],
+                          "<br> Users:", notwork$users[277:368], 
+                          "<br> Call Volume:", notwork$CallVolume[277:368], 
+                          "<br> Category:", notwork$Category)[277:368],
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",notwork$date[369:460],
+                          "<br> Users:", notwork$users[369:460], 
+                          "<br> Call Volume:", notwork$CallVolume[369:460], 
+                          "<br> Category:", notwork$Category)[369:460],
+        textposition = "auto",traces=4) %>%
+add_annotations(yref='paper',xref="paper",
+                y=-0.31,x=0.1, text="Issues",showarrow=F) 
+notworkpl_ios
+```
+
+\  
+
+##### Product Inquiry/ Order/ Return (Android)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+gdo_pi <- TSC_conn_gdo[which(TSC_conn_gdo$Issue=="product inquiry"),]
+gdo_or <- TSC_conn_gdo[which(TSC_conn_gdo$Issue=="order/return"),]
+gdo_pi$Category <- recode_factor(gdo_pi$Resolution, "provide electrical requirements"
+                                 ="Device info/reqs",
+"provide information regarding lcd display"="Device info/reqs",
+"provide measurements of the opener"="Device info/reqs",
+"provide the door requirements"="Device info/reqs",
+"provided homekit information"= "Device info/reqs",
+"provide compatibility"="Compatibility info",
+"provide registration/warranty information"="Warranty info",
+"provide tracking information"="Tracking info",
+"provide availability"="Availability info",
+"provide pricing"="Pricing info",
+"provide alternative item"="Alternative/Return item",
+ "information provided" ="Device info/reqs",
+"information provided - 1"="Others (mkt/cpn)",
+"na"="Device info/reqs"
+                                   )
+gdo_or$Category<- recode_factor(gdo_or$Resolution, 
+"provided order tracking information"="Tracking info",
+"provided quote/pricing"="Pricing info","provided return order status"="Tracking info",
+"return placed"="Alternative/Return item",
+"part/accessory missing in carton - accommodation order placed"="Alternative/Return item",
+"order placed"="Make order","order declined"="Make order",
+"unit is defective and in warranty - return order placed"="Alternative/Return item" 
+                                   )
+
+xws <- gdo_or[which(gdo_or$Resolution=="na"),]
+xws2 <- gdo_or[which(gdo_or$Resolution!="na"),]
+xws$Category <- as.character(xws$Category )
+xws$Category[c(1,3,6,12,13,19,27,38,42,43,46,49,52)] <- "Alternative/Return item"
+xws$Category[c(2,8,9,14,17,18,20,21,23,25,26,28,29,30,31,33,34,36,39,45,47,48,50,51)] <- "Make order"
+xws$Category[c(4,6,11,16,24,32,37)] <- "Device info/reqs"
+xws$Category[c(5,10,15,22,35,40,41)] <- "Tracking info"
+xws$Category[7] <- "Compatibility info"
+xws$Category[44] <- "Others (mkt/cpn)"
+gdo_or <- rbind(xws,xws2)
+gdo_pior <- rbind(gdo_pi,gdo_or)
+gdo_pior$Category <- as.factor(gdo_pior$Category)
+gdo_pior$Category <- recode_factor(gdo_pior$Category,
+"Device info/reqs"="Device/Warranty info",
+"Warranty info"="Device/Warranty info","Tracking info"="Order info",
+"Make order"="Order info","Others (mkt/cpn)"="Order info")
+gdo_pior$`Date/Time Opened` <- date(gdo_pior$`Date/Time Opened`)
+pior <- gdo_pior %>% group_by(`Date/Time Opened`,Category) %>% summarize(CallVolume=n())
+pior$Category <- as.factor(as.character(pior$Category))
+cat <- unlist(unique(pior$Category))
+ns_0 <- {}
+for (i in 1:length(cat)) {
+  ns <- pior[which(pior$Category==cat[i]),]
+  ns <- xts(x=ns[,-1],order.by=ns$`Date/Time Opened`)
+  ns <- merge(ns,zoo(NULL,seq(as.Date("2017/03/10"),as.Date("2018/12/09"),by="day")),all=TRUE)
+  ns$CallVolume[which(is.na(ns$CallVolume))] <-0
+  ep <- endpoints(ns, on = "weeks")
+  ns <- period.sum(ns[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ns)
+  index <- index(ns)
+  ns <- data.frame(date=index,CallVolume=cr)
+  ns$Category <- cat[i]
+  assign(paste("ns",i,sep="_"),rbind(get(paste("ns",i-1,sep="_")),ns))
+}
+rm(ns_1,ns_2,ns_3,ns_4,ns,ns_5,ns_0)
+pior <- ns_6
+pior$users <-rep(users$Count,6)
+pior$CallVolumePerc <- pior$CallVolume/pior$users
+
+pior_and <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=pior)+
+  geom_vline(aes(xintercept=as.numeric(android$dates[-18])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Alternative/Return item",
+                               "Availability Info", 
+                               "Compatibility Info",
+                               "Device/Warranty Info",
+                               "Order Info",
+                               "Pricing Info"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                               "#067a38","#0aadce","#9ea512"))+
+  scale_y_continuous(limits=c(0,0.00008),breaks=seq(0,0.00008,0.00002),
+                     labels=paste0(seq(0,0.008,0.002),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+a <- list(
+  x= as.numeric(android$dates[-c(8,18)])-5,
+  y = 0.00008,
+  text = android$version[-c(8,18)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 11,
+  color = 'darkgreen')
+
+piorpl_and <- ggplotly(pior_and) %>% layout(
+  title="Call Volume By Date--Order/Return/Product Inquiries (Android)",
+         annotations=a,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.23),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 7) %>%
+  style(hovertext = paste("Date:",pior$date[1:92],
+                          "<br> Users:", pior$users[1:92], 
+                          "<br> Call Volume:", pior$CallVolume[1:92], 
+                          "<br> Category:", pior$Category)[1:92],
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",pior$date[93:184],
+                          "<br> Users:", pior$users[93:184], 
+                          "<br> Call Volume:", pior$CallVolume[93:184], 
+                          "<br> Category:", pior$Category)[93:184],
+        textposition = "auto",traces=1) %>%
+  style(hovertext = paste("Date:",pior$date[185:276],
+                          "<br> Users:", pior$users[185:276], 
+                          "<br> Call Volume:", pior$CallVolume[185:276], 
+                          "<br> Category:", pior$Category)[185:276],
+        textposition = "auto",traces=4) %>%
+    style(hovertext = paste("Date:",pior$date[277:368],
+                          "<br> Users:", pior$users[277:368], 
+                          "<br> Call Volume:", pior$CallVolume[277:368], 
+                          "<br> Category:", pior$Category)[277:368],
+        textposition = "auto",traces=5) %>%
+      style(hovertext = paste("Date:",pior$date[369:460],
+                          "<br> Users:", pior$users[369:460], 
+                          "<br> Call Volume:", pior$CallVolume[369:460], 
+                          "<br> Category:", pior$Category)[369:460],
+        textposition = "auto",traces=6) %>%
+       style(hovertext = paste("Date:",pior$date[461:552],
+                          "<br> Users:", pior$users[461:552], 
+                          "<br> Call Volume:", pior$CallVolume[461:552], 
+                          "<br> Category:", pior$Category)[461:552],
+        textposition = "auto",traces=2) %>%
+add_annotations(yref='paper',xref="paper",
+                y=-0.31,x=-0.04, text="Issues",showarrow=F) 
+piorpl_and
+```
+
+##### Product Inquiry/ Order/ Return (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+pior_ios <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=pior)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Alternative/Return item",
+                               "Availability Info", 
+                               "Compatibility Info",
+                               "Device/Warranty Info",
+                               "Order Info",
+                               "Pricing Info"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                               "#067a38","#0aadce","#9ea512"))+
+  scale_y_continuous(limits=c(0,0.00008),breaks=seq(0,0.00008,0.00002),
+                     labels=paste0(seq(0,0.008,0.002),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(ios$dates[-c(13,14,21,23)])-5,
+  y = 0.00008,
+  text =ios$version[-c(13,14,21,23)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 11,
+  color = 'darkgreen')
+
+piorpl_ios <- ggplotly(pior_ios) %>% layout(
+  title="Call Volume By Date--Order/Return/Product Inquiries (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.23),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 7) %>%
+  style(hovertext = paste("Date:",pior$date[1:92],
+                          "<br> Users:", pior$users[1:92], 
+                          "<br> Call Volume:", pior$CallVolume[1:92], 
+                          "<br> Category:", pior$Category)[1:92],
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",pior$date[93:184],
+                          "<br> Users:", pior$users[93:184], 
+                          "<br> Call Volume:", pior$CallVolume[93:184], 
+                          "<br> Category:", pior$Category)[93:184],
+        textposition = "auto",traces=1) %>%
+  style(hovertext = paste("Date:",pior$date[185:276],
+                          "<br> Users:", pior$users[185:276], 
+                          "<br> Call Volume:", pior$CallVolume[185:276], 
+                          "<br> Category:", pior$Category)[185:276],
+        textposition = "auto",traces=4) %>%
+    style(hovertext = paste("Date:",pior$date[277:368],
+                          "<br> Users:", pior$users[277:368], 
+                          "<br> Call Volume:", pior$CallVolume[277:368], 
+                          "<br> Category:", pior$Category)[277:368],
+        textposition = "auto",traces=5) %>%
+      style(hovertext = paste("Date:",pior$date[369:460],
+                          "<br> Users:", pior$users[369:460], 
+                          "<br> Call Volume:", pior$CallVolume[369:460], 
+                          "<br> Category:", pior$Category)[369:460],
+        textposition = "auto",traces=6) %>%
+       style(hovertext = paste("Date:",pior$date[461:552],
+                          "<br> Users:", pior$users[461:552], 
+                          "<br> Call Volume:", pior$CallVolume[461:552], 
+                          "<br> Category:", pior$Category)[461:552],
+        textposition = "auto",traces=2) %>%
+add_annotations(yref='paper',xref="paper",
+                y=-0.31,x=-0.04, text="Issues",showarrow=F) 
+piorpl_ios
+```
+\  
+
+##### MyQ Account (Android)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+gdo_myqacc <- TSC_conn_gdo[which(TSC_conn_gdo$Issue=="myq account is not working as expected"),]
+gdo_myqacc$Category <- gdo_myqacc$Resolution
+gdo_myqacc$Category[grep("password|registration|login",gdo_myqacc$Resolution)] <- "Sign up/in"
+gdo_myqacc$Category[grep("serial",gdo_myqacc$Resolution)] <- "Serial Number"
+gdo_myqacc$Category[grep("^unable to",gdo_myqacc$Resolution)] <- "Link to Other Device"
+gdo_myqacc$Category[grep("does not respond from app - remove and read to account",gdo_myqacc$Resolution)] <- "Not Responding to App"
+gdo_myqacc$Category[grep("compatible device|myq device|replace device|replace gateway|opener|safety sensors|logic board",gdo_myqacc$Resolution)] <- "Device Not Working"
+gdo_myqacc$Category[grep("insight|firmware|learn button",gdo_myqacc$Resolution)] <- "Human Error"
+gdo_myqacc$Category <- recode_factor(gdo_myqacc$Category, "Human Error"="Minor Issues",
+                                     "Link to Other Device"="Minor Issues","na"="Minor Issues")
+
+gdo_myqacc$`Date/Time Opened` <- date(gdo_myqacc$`Date/Time Opened`)  
+myqacc <- gdo_myqacc %>% group_by(`Date/Time Opened`,Category) %>% summarize(CallVolume=n()) 
+myqacc$Category <- as.factor(as.character(myqacc$Category))
+cat <- unlist(unique(myqacc$Category))
+rm(ns_6)
+ns_0 <- {}
+for (i in 1:length(cat)) {
+  ns <- myqacc[which(myqacc$Category==cat[i]),]
+  ns <- xts(x=ns[,-1],order.by=ns$`Date/Time Opened`)
+  ns <- merge(ns,zoo(NULL,seq(as.Date("2017/03/10"),as.Date("2018/12/09"),by="day")),all=TRUE)
+  ns$CallVolume[which(is.na(ns$CallVolume))] <-0
+  ep <- endpoints(ns, on = "weeks")
+  ns <- period.sum(ns[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ns)
+  index <- index(ns)
+  ns <- data.frame(date=index,CallVolume=cr)
+  ns$Category <- cat[i]
+  assign(paste("ns",i,sep="_"),rbind(get(paste("ns",i-1,sep="_")),ns))
+}
+rm(ns_1,ns_2,ns_3,ns_4,ns,ns_0)
+myqacc <- ns_5
+myqacc$users <-rep(users$Count,5)
+myqacc$CallVolumePerc <- myqacc$CallVolume/myqacc$users
+
+myqacc_and <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,
+                                       color=Category),data=myqacc)+
+  geom_vline(aes(xintercept=
+                   as.numeric(android$dates[-18])),
+             linetype=2, 
+             colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Device Not Working",
+                               "Minor Issues", 
+                               "Not Responding to App",
+                               "Serial Number","Sign Up/In"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                                "#067a38","#0aadce"))+
+  scale_y_continuous(limits=c(0,0.00006),
+                     breaks=seq(0,0.00006,0.00002),
+                     labels=paste0(seq(0,0.006,0.002),"%"))+
+  scale_x_date(date_breaks = "1 month", 
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+a <- list(
+  x= as.numeric(android$dates[-c(8,18)])-5,
+  y = 0.00006,
+  text = android$version[-c(8,18)],
+  textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+
+myqaccplt_and <- ggplotly(myqacc_and) %>% 
+  layout(title="Call Volume By Date--MyQ Account Issues (Android)",
+         annotations=a,
+         legend = list(orientation = "h",
+                       xanchor = "center", 
+                       x = 0.5,y=-0.23),font=t)  %>% 
+  style(hoverinfo = "none", traces = 6) %>%
+  style(hovertext = paste("Date:",myqacc$date[1:92],
+                          "<br> Users:", myqacc$users[1:92], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[1:92], 
+                          "<br> Category:",
+                          myqacc$Category[1:92]),
+        textposition = "auto",traces=5) %>%
+  style(hovertext = paste("Date:",myqacc$date[93:184],
+                          "<br> Users:", myqacc$users[93:184], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[93:184], 
+                          "<br> Category:",
+                          myqacc$Category[93:184]),
+        textposition = "auto",traces=3) %>%
+    style(hovertext = paste("Date:",myqacc$date[185:276],
+                          "<br> Users:", myqacc$users[185:276], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[185:276], 
+                          "<br> Category:",
+                          myqacc$Category[185:276]),
+        textposition = "auto",traces=2) %>%
+      style(hovertext = paste("Date:",myqacc$date[277:368],
+                          "<br> Users:", myqacc$users[277:368], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[277:368], 
+                          "<br> Category:",
+                          myqacc$Category[277:368]),
+        textposition = "auto",traces=4) %>%
+        style(hovertext = paste("Date:",myqacc$date[369:460],
+                          "<br> Users:", myqacc$users[369:460], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[369:460], 
+                          "<br> Category:",
+                          myqacc$Category[369:460]),
+        textposition = "auto",traces=1) %>%
+  add_annotations(yref='paper',xref="paper",
+                  y=-0.31,x=0.04, text="Issues",
+                  showarrow=F) 
+myqaccplt_and
+```
+
+##### MyQ Account (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+myqacc_ios <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,
+                                       color=Category),data=myqacc)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Device Not Working",
+                               "Minor Issues", 
+                               "Not Responding to App",
+                               "Serial Number","Sign Up/In"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                                "#067a38","#0aadce"))+
+  scale_y_continuous(limits=c(0,0.00006),
+                     breaks=seq(0,0.00006,0.00002),
+                     labels=paste0(seq(0,0.006,0.002),"%"))+
+  scale_x_date(date_breaks = "1 month", 
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(ios$dates[-c(13,14,21,23)])-5,
+  y = 0.00006,
+  text =ios$version[-c(13,14,21,23)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+
+myqaccplt_ios <- ggplotly(myqacc_ios) %>% 
+  layout(title="Call Volume By Date--MyQ Account Issues (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+                       xanchor = "center", 
+                       x = 0.5,y=-0.23),font=t)  %>% 
+  style(hoverinfo = "none", traces = 6) %>%
+  style(hovertext = paste("Date:",myqacc$date[1:92],
+                          "<br> Users:", myqacc$users[1:92], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[1:92], 
+                          "<br> Category:",
+                          myqacc$Category[1:92]),
+        textposition = "auto",traces=5) %>%
+  style(hovertext = paste("Date:",myqacc$date[93:184],
+                          "<br> Users:", myqacc$users[93:184], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[93:184], 
+                          "<br> Category:",
+                          myqacc$Category[93:184]),
+        textposition = "auto",traces=3) %>%
+    style(hovertext = paste("Date:",myqacc$date[185:276],
+                          "<br> Users:", myqacc$users[185:276], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[185:276], 
+                          "<br> Category:",
+                          myqacc$Category[185:276]),
+        textposition = "auto",traces=2) %>%
+      style(hovertext = paste("Date:",myqacc$date[277:368],
+                          "<br> Users:", myqacc$users[277:368], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[277:368], 
+                          "<br> Category:",
+                          myqacc$Category[277:368]),
+        textposition = "auto",traces=4) %>%
+  style(hovertext = paste("Date:",myqacc$date[369:460],
+                          "<br> Users:", myqacc$users[369:460], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[369:460], 
+                          "<br> Category:",
+                          myqacc$Category[369:460]),
+        textposition = "auto",traces=1) %>%
+  add_annotations(yref='paper',xref="paper",
+                  y=-0.31,x=0.04, text="Issues",
+                  showarrow=F) 
+myqaccplt_ios
+```
+\  
+
+##### MyQ Hardware (Android)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+gdo_myqhd <- 
+  TSC_conn_gdo[which(TSC_conn_gdo$Issue=="myq hardware does not work as expected"),]
+gdo_myqhd$Category <- gdo_myqhd$Resolution
+gdo_myqhd$Category[grep("door sensor",gdo_myqhd$Resolution)] <- 
+  "Door Sensor"
+gdo_myqhd$Category[grep("setup.myqdevice.com",gdo_myqhd$Category)] <-
+  "setup.mydevice.com"
+gdo_myqhd$Category[grep("bluetooth",gdo_myqhd$Category)] <- 
+  "Connect bluetooth"
+gdo_myqhd$Category[grep("router",gdo_myqhd$Category)] <- 
+  "Router"
+gdo_myqhd$Category[grep("battery",gdo_myqhd$Category)] <- 
+  "Battery"
+gdo_myqhd$Category[grep("replace gateway|replace hub|
+                        replacement gateway|replacement hub|
+                        logic board|gateway unresponsive",gdo_myqhd$Category)]<- 
+  "Gateway/Hub"
+gdo_myqhd$Category[grep("network|wi-fi",gdo_myqhd$Category)] <-
+  "wi-fi/network"
+gdo_myqhd$Category[grep("firewall",gdo_myqhd$Category)] <- 
+  "firewall"
+gdo_myqhd$Category[grep("gdo|outlet",gdo_myqhd$Category)] <- 
+  "GDO issues"
+gdo_myqhd$Category[grep("interfer",gdo_myqhd$Category)] <- 
+  "Interference"
+gdo_myqhd$Category <- recode_factor(gdo_myqhd$Category, 
+            "firewall"="Wifi network", 
+"myq-nnn not broadcast(not showing) - relocate product during setup"=
+  "Wifi network",
+             "wi-fi/network"="Wifi network",
+            "Door Sensor"="Sensor/GDO/Gateway/Hub",
+           "Gateway/Hub" ="Sensor/GDO/Gateway/Hub",
+           "Battery"="Sensor/GDO/Gateway/Hub",
+           "GDO issues" ="Sensor/GDO/Gateway/Hub",
+           "Router"="Sensor/GDO/Gateway/Hub",
+           "Interference"="Other Issues",
+             "setup.mydevice.com"="Other Issues",
+                      "na"="Other Issues",
+         "servers are down - explain situation"=
+  "Other Issues"
+)
+gdo_myqhd$`Date/Time Opened` <- 
+  date(gdo_myqhd$`Date/Time Opened`)
+myqhd <- gdo_myqhd %>% 
+  group_by(`Date/Time Opened`,Category)%>% 
+  summarize(CallVolume=n())
+myqhd$Category <- as.factor(as.character(myqhd$Category))
+cat <- unlist(unique(myqhd$Category))
+ns_0 <- {}
+for (i in 1:length(cat)) {
+  ns <- myqhd[which(myqhd$Category==cat[i]),]
+  ns <- xts(x=ns[,-1],order.by=ns$`Date/Time Opened`)
+  ns <- merge(ns,zoo(NULL,seq(as.Date("2017/03/10"),
+                              as.Date("2018/12/09"),by="day")),
+              all=TRUE)
+  ns$CallVolume[which(is.na(ns$CallVolume))] <-0
+  ep <- endpoints(ns, on = "weeks")
+  ns <- period.sum(ns[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ns)
+  index <- index(ns)
+  ns <- data.frame(date=index,CallVolume=cr)
+  ns$Category <- cat[i]
+  assign(paste("ns",i,sep="_"),rbind(
+    get(paste("ns",i-1,sep="_")),ns))
+}
+rm(ns_1,ns_2,ns_3,ns,ns_0)
+myqhd <- ns_4
+myqhd$users <-rep(users$Count,4)
+myqhd$CallVolumePerc <- myqhd$CallVolume/myqhd$users
+myqhd_and <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),
+            data=myqhd)+
+  geom_vline(aes(xintercept=as.numeric(android$dates[-18])),
+             linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c(
+    "Bluetooth Connection","Other Issues", 
+    "Sensor/GDO/GW/Hub","Wifi Network"),
+    values=c("#b942f4","#dd3e1f","#1053b2","#067a38"))+
+  scale_y_continuous(limits=c(0,0.00006),
+                     breaks=seq(0,0.00006,0.00002),
+                     labels=paste0(seq(0,0.006,0.002),
+                                   "%"))+
+  scale_x_date(date_breaks = "1 month",
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+a <- list(
+  x= as.numeric(android$dates[-c(8,18)])-5,
+  y = 0.00006,
+  text = android$version[-c(8,18)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+
+myqhdplt_and <- ggplotly(myqhd_and) %>% 
+  layout(title="Call Volume By Date--MyQ Hardware Issues (Android)",
+         annotations=a,legend = list(orientation = "h",
+                                     xanchor = "center",
+                                     x = 0.5,y=-0.23),font=t)  %>% 
+  style(hoverinfo = "none", traces = 5) %>%
+  style(hovertext = paste("Date:",myqhd$date[1:92],
+                          "<br> Users:", myqhd$users[1:92], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[1:92], 
+                          "<br> Category:",
+                          myqhd$Category[1:92]),
+        textposition = "auto",traces=4) %>%
+  style(hovertext = paste("Date:",myqhd$date[93:184],
+                          "<br> Users:", myqhd$users[93:184], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[93:184], 
+                          "<br> Category:",
+                          myqhd$Category[93:184]),
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",myqhd$date[185:276],
+                          "<br> Users:", myqhd$users[185:276], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[185:276], 
+                          "<br> Category:",
+                          myqhd$Category[185:276]),
+        textposition = "auto",traces=2) %>%
+  style(hovertext = paste("Date:",myqhd$date[277:368],
+                          "<br> Users:", myqhd$users[277:368], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[277:368], 
+                          "<br> Category:",
+                          myqhd$Category[277:368]),
+        textposition = "auto",traces=1) %>%
+  add_annotations(yref='paper',xref="paper",
+                  y=-0.31,x=0.11, text="Issues",showarrow=F)
+myqhdplt_and
+```
+
+##### MyQ Hardware (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+myqhd_ios <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,
+                                       color=Category),data=myqhd)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+ scale_color_manual (labels=c(
+    "Bluetooth Connection","Other Issues", 
+    "Sensor/GDO/GW/Hub","Wifi Network"),
+    values=c("#b942f4","#dd3e1f","#1053b2","#067a38"))+
+  scale_y_continuous(limits=c(0,0.00006),
+                     breaks=seq(0,0.00006,0.00002),
+                     labels=paste0(seq(0,0.006,0.002),
+                                   "%"))+
+  scale_x_date(date_breaks = "1 month",
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(ios$dates[-c(13,14,21,23)])-5,
+  y = 0.00006,
+  text =ios$version[-c(13,14,21,23)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+
+myqhdplt_ios <- ggplotly(myqhd_ios) %>% 
+  layout(title="Call Volume By Date--MyQ Hardware Issues (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+                       xanchor = "center", 
+                       x = 0.5,y=-0.23),font=t)  %>% 
+  style(hoverinfo = "none", traces = 5) %>%
+  style(hovertext = paste("Date:",myqhd$date[1:92],
+                          "<br> Users:", myqhd$users[1:92], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[1:92], 
+                          "<br> Category:",
+                          myqhd$Category[1:92]),
+        textposition = "auto",traces=4) %>%
+  style(hovertext = paste("Date:",myqhd$date[93:184],
+                          "<br> Users:", myqhd$users[93:184], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[93:184], 
+                          "<br> Category:",
+                          myqhd$Category[93:184]),
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",myqhd$date[185:276],
+                          "<br> Users:", myqhd$users[185:276], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[185:276], 
+                          "<br> Category:",
+                          myqhd$Category[185:276]),
+        textposition = "auto",traces=2) %>%
+  style(hovertext = paste("Date:",myqhd$date[277:368],
+                          "<br> Users:", myqhd$users[277:368], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[277:368], 
+                          "<br> Category:",
+                          myqhd$Category[277:368]),
+        textposition = "auto",traces=1) %>%
+  add_annotations(yref='paper',xref="paper",
+                  y=-0.31,x=0.11, text="Issues",
+                  showarrow=F) 
+myqhdplt_ios
+```
+\  
+
+##### Low Frequency Issues (Android)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+gdo_lf <- TSC_conn_gdo[which(TSC_conn_gdo$Issue 
+                             %in% 
+c("alerts and notifications do not work as expected",
+"installation", "na","programming to a gate",
+"programming to a gdo")),]
+gdo_lf$Category <- gdo_lf$Issue
+gdo_lf$Category <- recode_factor(gdo_lf$Category, 
+"alerts and notifications do not work as expected"=
+"Alerts/Notifications do not work", 
+ "na"="Other Issues",
+"programming to a gate"="Other Issues",
+"programming to a gdo"="Other Issues")
+
+gdo_lf$`Date/Time Opened` <- date(gdo_lf$`Date/Time Opened`)
+lf <- gdo_lf %>% 
+  group_by(`Date/Time Opened`,Category) %>% 
+  summarize(CallVolume=n())
+lf$Category <- as.factor(as.character(lf$Category))
+cat <- unlist(unique(lf$Category))
+ns_0 <- {}
+for (i in 1:length(cat)) {
+  ns <- lf[which(lf$Category==cat[i]),]
+  ns <- xts(x=ns[,-1],order.by=ns$`Date/Time Opened`)
+  ns <- merge(ns,zoo(NULL,
+                     seq(as.Date("2017/03/10"),
+                              as.Date("2018/12/09"),by="day")),
+              all=TRUE)
+  ns$CallVolume[which(is.na(ns$CallVolume))] <-0
+  ep <- endpoints(ns, on = "weeks")
+  ns <- period.sum(ns[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ns)
+  index <- index(ns)
+  ns <- data.frame(date=index,CallVolume=cr)
+  ns$Category <- cat[i]
+  assign(paste("ns",i,sep="_"),
+         rbind(get(paste("ns",i-1,sep="_")),ns))
+}
+rm(ns_1,ns_2,ns,ns_0)
+lf<- ns_3
+lf$users <-rep(users$Count,3)
+lf$CallVolumePerc <- lf$CallVolume/lf$users
+lf_and <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=lf)+
+  geom_vline(aes(xintercept=as.numeric(android$dates[-18])),
+             linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Alerts/Notifications",
+                               "Installiation",
+                               "Other Issues"),
+                      values=c("#b942f4","#dd3e1f",
+                               "#1053b2"))+
+  scale_y_continuous(limits=c(0,0.00008),
+                     breaks=seq(0,0.00008,0.00002),
+                     labels=paste0(seq(0,0.008,0.002),
+                                   "%"))+
+  scale_x_date(date_breaks = "1 month",
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+a <- list(
+  x= as.numeric(
+    android$dates[-c(8,18)])-5,
+  y = 0.00008,
+  text = android$version[-c(8,18)],
+  textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+lf <- lf[order(lf$Category),]
+lfpl_and <- ggplotly(lf_and) %>% 
+  layout(title="Call Volume By Date--Low Freq Issues (Android)",
+annotations=a,
+legend = list(orientation = "h",
+ xanchor = "center", 
+  x = 0.5,y=-0.23),font=t)  %>% 
+  style(hoverinfo = "none", traces = 4) %>%
+  style(hovertext = paste("Date:",lf$date[1:92],
+                          "<br> Users:", lf$users[1:92],
+                          "<br> Call Volume:",lf$CallVolume[1:92] ,
+                          "<br> Category:", lf$Category[1:92]),
+        traces=1) %>%
+  style(hovertext = paste("Date:",lf$date[93:184],
+                          "<br> Users:", lf$users[93:184],
+                          "<br> Call Volume:",lf$CallVolume[93:184] ,
+                          "<br> Category:", lf$Category[93:184]),
+        traces=2) %>%
+  style(hovertext = paste("Date:",lf$date[185:276],
+                          "<br> Users:", lf$users[185:276],
+                          "<br> Call Volume:",lf$CallVolume[185:276] ,
+                          "<br> Category:", lf$Category[185:276]),
+        traces=3) %>%
+  add_annotations(yref='paper',xref="paper",y=-0.31,x=0.17, 
+                  text="Issues",showarrow=F) 
+lfpl_and
+```
+\  
+
+##### Low Frequency Issues (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+lf_ios <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,
+                                       color=Category),data=lf)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+ scale_color_manual (labels=c("Alerts/Notifications",
+                               "Installiation",
+                               "Other Issues"),
+                      values=c("#b942f4","#dd3e1f",
+                               "#1053b2"))+
+  scale_y_continuous(limits=c(0,0.00008),
+                     breaks=seq(0,0.00008,0.00002),
+                     labels=paste0(seq(0,0.008,0.002),
+                                   "%"))+
+  scale_x_date(date_breaks = "1 month",
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(
+    ios$dates[-c(13,14,21,23)])-5,
+  y = 0.00008,
+  text =ios$version[-c(13,14,21,23)],
+  textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+
+lfpl_ios <- ggplotly(lf_ios) %>% 
+  layout(title="Call Volume By Date--Low Freq Issues (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+ xanchor = "center", 
+  x = 0.5,y=-0.2),font=t)  %>% 
+  style(hoverinfo = "none", traces = 4) %>%
+  style(hovertext = paste("Date:",lf$date[1:92],
+                          "<br> Users:", lf$users[1:92],
+                          "<br> Call Volume:",lf$CallVolume[1:92] ,
+                          "<br> Category:", lf$Category[1:92]),
+        traces=1) %>%
+  style(hovertext = paste("Date:",lf$date[93:184],
+                          "<br> Users:", lf$users[93:184],
+                          "<br> Call Volume:",lf$CallVolume[93:184] ,
+                          "<br> Category:", lf$Category[93:184]),
+        traces=2) %>%
+  style(hovertext = paste("Date:",lf$date[185:276],
+                          "<br> Users:", lf$users[185:276],
+                          "<br> Call Volume:",lf$CallVolume[185:276] ,
+                          "<br> Category:", lf$Category[185:276]),
+        traces=3) %>%
+  add_annotations(yref='paper',xref="paper",y=-0.31,x=0.17, 
+                  text="Issues",showarrow=F) 
+lfpl_ios
+```
+
+\  
+
+\  
+
+## 2. Major Findings --- Wifi Connectable Devices
+\  
+
+* After May 2018, call related to users having problems setting up their myq devices(adding devices) started to increase drastically . Although with every new app release, the call volume related to this issue decreases, the decrease only lasts one or two weeks, until the number bounce back and continue increasing. This pattern tells us the users does not understand how to add devices to their app or install their internet hub. This pattern might be due to several reasons. Every time a new app version releases, the app itself becomes more and more complex, and the company did not offer enough guidance on how to connect the app to devices for the first time. This pattern implies the myq app might have a bad user interface design, giving the users a hard time to find the instructions on how to add devices to the app or link the app to third party devices like Google Home. If possible, we would recommend Chamberlain to improve the user interface design so that the users can quickly locate and follow the instructions on how to add devices.
+
+\  
+
+* In general, call volume related to users having malfunctioned devices is not related to whether a new app version is released or not. Although the call volume related to malfunctioned door control, opener,and logic boards started increasing from June 2018, the volume begun to fell starting from November last year. One thing we found out is that for the week ending 3/19/2017, a relatively large amount of users had problems with their garage doors, either because the garage door could not close entirely or becuase the gears controlling the doors' movement is broken. Although we do not know why this pattern occurred, (it might just be an anomaly) it might be interesting for Chamberlain to investigate in this. 
+
+\  
+
+* Starting from Jun 2018, there was a stark increase in calls related to customers asking for device compatibility or returning the products they bought. By further investigating this pattern, we noticed that during that specific period of time, some of Chamberlain's gdo are not compatible with the users' phones or other devices. However, they released a new product that can be installed onto the products having compatibility problems to fix this issue and they are giving out the new product for free. Many users did not receive this new product and they are calling Chamberlain to ask for it. Some users, after finding out the products they bought are not compatible with their garage doors, simply returned the products. After September 2018, the call volume started decreasing.
+
+\  
+
+* From March to August 2017 and from December 2017 to March 2018, the call volume related to customers asking information about serial numbers has been increasing every once in a while.It seems like users are having  difficulty getting their serial numbers to be recognized by the myq app. We don't know what might have caused this trend, but it might be due to a glitch in their website or app. When they fixed the app after May 2018, we can see the call volume drastically decreased and never going up again. 
+
+\  
+
+* However, starting from Jun 2018, there was a big increase in the call related to devices not responding to the app. The call volume related to these problems has been increasing for the last 5 months. Although we can see a decrease in call volume every time a new version of the app is released, the number will soon bounce back, which indicates Chamberlain never actually fixed the bug. We would recommend chamberlain to fix the bug as soon as possible. Otherwise, they will see a huge increase in call volume in the future.
+
+\  
+
+* It seems like Chamberlain's users have problems connecting to Wi-fi before April 2018, but Chamberlain fixed the issue, and now the calls related to network connection problem is decreasing.
+
+\  
+
+* In terms of low-frequency issues, Chamberlain's users were having a difficult time installing their hardware (door control/openers) in the week ending 3/19/2017.Notice that this was the same week when a huge amount of Chamberlain's users had door problems. Maybe there is a hidden relationship between door problems and installation problems?
+
+## 3. Data Visualizations Related to Devices that cannot be Connected to WiFi
+
+#### Non-WI-FI Connectable Devices {.tabset}
+
+##### MyQ Setup (Android)
+```{r,out.width="110%",out.height="100%",fig.align="right"}
+gdo_myqsetup <- TSC_unconn_gdo[which(TSC_unconn_gdo$Issue=="myq setup"),]
+gdo_myqsetup$Category <- gsub("\\-.*","",gdo_myqsetup$Resolution)
+gdo_myqsetup$Category[grep("^link to|^need assistance",gdo_myqsetup$Category)] <- "link to other device"
+gdo_myqsetup$`Date/Time Opened` <- date(gdo_myqsetup$`Date/Time Opened`)
+myqsetup <- gdo_myqsetup %>% group_by(`Date/Time Opened`,Category) %>% summarize(CallVolume=n())
+myqsetup$Category <- as.factor(as.character(myqsetup$Category))
+cat <- unlist(unique(myqsetup$Category))
+ms_0 <- {}
+for (i in 1:length(cat)) {
+  ms <- myqsetup[which(myqsetup$Category==cat[i]),]
+  ms <- xts(x=ms[,-1],order.by=ms$`Date/Time Opened`)
+  ms <- merge(ms,zoo(NULL,seq(as.Date("2017/03/10"),as.Date("2018/12/09"),by="day")),all=TRUE)
+  ms$CallVolume[which(is.na(ms$CallVolume))] <-0
+  ep <- endpoints(ms, on = "weeks")
+  ms <- period.sum(ms[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ms)
+  index <- index(ms)
+  ms <- data.frame(date=index,CallVolume=cr)
+  ms$Category <- cat[i]
+  assign(paste("ms",i,sep="_"),rbind(get(paste("ms",i-1,sep="_")),ms))
+}
+rm(ms_1,ms_2,ms_3,ms_4,ms_5,ms_6,ms_7,ms_8,ms_9,ms_10,ms,ms_0)
+myqsetup_big <- ms_11
+myqsetup_big$Category <- as.character(myqsetup_big$Category)
+myqsetup_big$Category[which(myqsetup_big$Category %in% c("security settings ","na","door sensor ",
+                                                         "alerts and notifications ","internet gateway ",
+                                                         "touch id ","link to other device","myq garage hub "))] <- "Other Issues"
+myqsetup_big$Category <- as.factor(myqsetup_big$Category)
+myqsetup_big <- myqsetup_big %>% group_by(Category,date) %>% summarize(CallVolume=sum(CallVolume))
+myqsetup_big <- myqsetup_big[c(2,3,1)]
+myqsetup_big$Category <- as.character(myqsetup_big$Category)
+myqsetup_big$users <-rep(users$Count,4)
+options(scipen=999)
+myqsetup_big$CallVolumePerc <- myqsetup_big$CallVolume/myqsetup_big$users
+myqsetuogr_and <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=myqsetup_big)+
+  geom_vline(aes(xintercept=as.numeric(android$dates[-18])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("MyQ Account","MyQ Device", 
+                               "MyQ Serial Number","Other Issues"),
+                      values=c("#dd8716","#dd3e1f",
+                               "#1053b2","grey70"))+
+  scale_y_continuous(limits=c(0,0.00005),breaks=seq(0,0.00005,0.00001),
+                     labels=paste0(seq(0,0.005,0.001),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+a <- list(
+  x= as.numeric(android$dates[-c(8,18)])-5,
+  y = 0.00005,
+  text = android$version[-c(8,18)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 11,
+  color = 'darkgreen')
+ggplotly(myqsetuogr_and) %>% layout(
+  title="Call Volume By Date--MyQ Setup.High Frequency Issues (Android)",
+         annotations=a,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.2),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 5) %>%
+  style(hovertext = paste("Date:",myqsetup_big$date[1:92],
+                          "<br> Users:", myqsetup_big$users[1:92], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[1:92], 
+                          "<br> Category:", myqsetup_big$Category)[1:92],
+        textposition = "auto",traces=1) %>%
+   style(hovertext = paste("Date:",myqsetup_big$date[93:184],
+                          "<br> Users:", myqsetup_big$users[93:184], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[93:184], 
+                          "<br> Category:", myqsetup_big$Category)[93:184],
+        textposition = "auto",traces=2) %>%
+   style(hovertext = paste("Date:",myqsetup_big$date[185:276],
+                          "<br> Users:", myqsetup_big$users[185:276], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[185:276], 
+                          "<br> Category:", myqsetup_big$Category)[185:276],
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",myqsetup_big$date[277:368],
+                          "<br> Users:", myqsetup_big$users[277:368], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[277:368], 
+                          "<br> Category:", myqsetup_big$Category)[277:368],
+        textposition = "auto",traces=4) %>%
+add_annotations(yref='paper',xref="paper",
+                y=-0.28,x=0.16, text="Issues",showarrow=F) 
+```
+\  
+
+##### MyQ Setup (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+myqsetuogr_ios <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=myqsetup_big)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("MyQ Account","MyQ Device", 
+                               "MyQ Serial Number","Other Issues"),values=c("#dd8716","#dd3e1f","#1053b2","grey70"))+
+  scale_y_continuous(limits=c(0,0.00005),breaks=seq(0,0.00005,0.00001),
+                     labels=paste0(seq(0,0.005,0.001),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(ios$dates[-c(13,14,21,23)])-5,
+  y = 0.00005,
+  text = ios$version[-c(13,14,21,23)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+ggplotly(myqsetuogr_ios) %>% layout(
+  title="Call Volume By Date--MyQ Setup.High Frequency Issues (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.23),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 5) %>%
+  style(hovertext = paste("Date:",myqsetup_big$date[1:92],
+                          "<br> Users:", myqsetup_big$users[1:92], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[1:92], 
+                          "<br> Category:", myqsetup_big$Category)[1:92],
+        textposition = "auto",traces=1) %>%
+   style(hovertext = paste("Date:",myqsetup_big$date[93:184],
+                          "<br> Users:", myqsetup_big$users[93:184], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[93:184], 
+                          "<br> Category:", myqsetup_big$Category)[93:184],
+        textposition = "auto",traces=2) %>%
+   style(hovertext = paste("Date:",myqsetup_big$date[185:276],
+                          "<br> Users:", myqsetup_big$users[185:276], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[185:276], 
+                          "<br> Category:", myqsetup_big$Category)[185:276],
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",myqsetup_big$date[277:368],
+                          "<br> Users:", myqsetup_big$users[277:368], 
+                          "<br> Call Volume:", myqsetup_big$CallVolume[277:368], 
+                          "<br> Category:", myqsetup_big$Category)[277:368],
+        textposition = "auto",traces=4) %>%
+add_annotations(yref='paper',xref="paper",
+                y=-0.31,x=0.16, text="Issues",showarrow=F) 
+```
+\  
+
+##### Hardware Malfunctioning (Android)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+gdo_notwork <- TSC_unconn_gdo[which(TSC_unconn_gdo$Issue=="does not work as expected"),]
+gdo_notwork$Category <- gsub("\\-.*","",gdo_notwork$Resolution)
+gdo_notwork$Category <- 
+  recode_factor(gdo_notwork$Category, 
+                                      "accessory defective "
+                ="door control",
+                                      "battery backup is dead/low "
+                ="opener hardware",
+                                      "break or short in door control wiring"
+                ="door control",
+                                      "break or short in wiring"
+                ="opener hardware",
+                                      "chain or belt is too loose or too tight"
+                ="opener hardware",
+                                      "chain, belt or rack failed "
+                ="opener hardware", 
+                                      "defective door control "
+                ="door control", 
+                                      "door control failed"
+                ="door control",
+                "door control flashing "="door control")
+
+gdo_notwork$Category <- 
+  recode_factor(gdo_notwork$Category, 
+                "door control malfunctioned or failed"
+                ="door control",
+                                      "door does not have proper reinforcement"
+                ="door/locks",
+                                      "door lock engaged "
+                ="door/locks",
+                "door out of balance, broken spring "
+                ="door/locks",
+                                      "door too heavy/binding"
+                ="door/locks",
+                "force are too high"="door/locks",
+                 "gap in end panel to cover"
+                ="opener hardware",
+                "gear and sprocket worn or broken"
+                ="opener hardware",
+                                      "gears stripped "
+                ="opener hardware",
+                "hanging brackets are loose or incorrectly installed"
+                ="opener hardware",
+                                      "ac gdo capacitor failed "
+                ="opener hardware",
+                "light bulb burned out"
+                ="opener hardware",
+                                      "light feature is turned on"
+                ="opener hardware")
+
+gdo_notwork$Category <- 
+  recode_factor(gdo_notwork$Category, 
+                                     
+                "light socket failed"="opener hardware",
+                                      "light socket tabs compressed"
+                ="opener hardware",
+                "lights stay on too long"="opener hardware",
+                                      "limit switch assembly failed "
+                ="door/locks",
+                "limits and forces not programmed "
+                ="door/locks",
+                                      "manual disconnect not engaged "
+                ="door/locks",
+                "manual release not engaged "
+                ="door/locks",
+                                      "neighbors remote programmed to unit" 
+                ="other issues",
+                "no other access to garage"="door control",
+                                      "safety sensors failed"
+                ="sensors", 
+                "safety sensors are out of alignment"="sensors")
+
+gdo_notwork$Category <- 
+  recode_factor(gdo_notwork$Category, 
+                                      "logic board failed"="logic board",
+                "travel not set "="door/locks", 
+                "remote failed"="door control",
+                 "logic board failed "="logic board",
+                "recent power outage" ="other issues", 
+                "no power to outlet gfi/breaker"="other issues",
+                "opener out of adjustment "="opener hardware",
+                 "only runs on battery backup"="other issues",
+                "travel module failed "="opener hardware",
+                 "rpm sensor failed "="opener hardware",
+                "remote light failed"="door control", 
+                 "safety sensors are obstructed"="sensors",
+                "using incorrect object to test system"="other issues",
+                "safety sensors mounted incorrectly"="sensors",
+                "sunlight interference"="other issues",
+                "rpm sensor not seated properly "="opener hardware",
+                "rollers and hinges need to be lubricated"="door/locks",
+                                      "motor failed "="opener hardware",
+                "motion sensor door controls are too close"= "sensors", 
+                "travel module harness disconnected"="opener hardware",
+                "trolley stuck on stop bolt "="opener hardware",
+        "rjo cable tension monitor improperly installed"="sensors",
+        "test safety reversal/protector system not working"="sensors",
+"smoke detector or other device is beeping not the opener "="other issues",
+"security +2.0 activitating pre '93 opener"= "opener hardware")
+
+gdo_notwork$Category <- 
+  recode_factor(gdo_notwork$Category, 
+
+                                       "short in wiring "="opener hardware",
+                "motor vibration heard in ceiling or house "="opener hardware",
+                                      "motor bushings failed "="opener hardware",
+                "motor overheated"="opener hardware",
+                                      "transformer failed "="opener hardware",
+                "rjo cable tension monitor failed "="sensors",
+                 "too much exposed wire, wired shorting to soder"=
+                  "opener hardware", 
+                 "remote/keyless entry failed or defective "=
+                  "door control",
+                  "remote light is too far from rjo or interference"=
+                  "door control",
+                 "rjo set screws in collar are loose "=
+                  "opener hardware",
+                 "rjo internal set screws loose "=
+                  "opener hardware"
+                                      )
+
+gdo_notwork$Category <- as.character(gdo_notwork$Category)
+gdo_notwork$Category[which(gdo_notwork$Category=="na")] <-
+  gdo_notwork$`Issue Detail`[which(gdo_notwork$Category=="na")] 
+gdo_notwork$Category <- recode_factor(gdo_notwork$Category,
+"can't access garage"="door control",
+"door does not close"="door/locks",
+"door does not open"="door/locks",
+ "door does not reverse as designed"="door/locks",
+"door hits the ground and reverses"="door/locks",
+"door runs on its own"="door/locks",
+"garage door monitor does not work"="sensors",
+"lights do not come on"="opener hardware",
+"lights flash 10 times"="opener hardware",
+ "lights stay on"="opener hardware",
+"motor hums door won't move"="opener hardware",
+ "opener dead or 2 clicks"="opener hardware",
+"opener is beeping"="opener hardware",
+"opener is noisy or vibrates"="opener hardware")
+gdo_notwork$Category <- recode_factor(gdo_notwork$Category,
+"door control"="door control/sensors","sensors"="door control/sensors")
+
+gdo_notwork$`Date/Time Opened` <- date(gdo_notwork$`Date/Time Opened`)
+notwork <- gdo_notwork %>% group_by(`Date/Time Opened`,Category) %>% 
+  summarize(CallVolume=n())
+notwork$Category <- as.factor(as.character(notwork$Category))
+cat <- unlist(unique(notwork$Category))
+ns_0 <- {}
+for (i in 1:length(cat)) {
+  ns <- notwork[which(notwork$Category==cat[i]),]
+  ns <- xts(x=ns[,-1],order.by=ns$`Date/Time Opened`)
+  ns <- merge(ns,zoo(NULL,seq(as.Date("2017/03/10"),
+                              as.Date("2018/12/09"),by="day"))
+              ,all=TRUE)
+  ns$CallVolume[which(is.na(ns$CallVolume))] <-0
+  ep <- endpoints(ns, on = "weeks")
+  ns <- period.sum(ns[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ns)
+  index <- index(ns)
+  ns <- data.frame(date=index,CallVolume=cr)
+  ns$Category <- cat[i]
+  assign(paste("ns",i,sep="_"),
+         rbind(get(paste("ns",i-1,sep="_")),ns))
+}
+rm(ns_1,ns_2,ns_3,ns_4,ns,ns_0)
+notwork <- ns_5
+notwork$users <-rep(users$Count,5)
+notwork$CallVolumePerc <- 
+  notwork$CallVolume/notwork$users
+
+notwork_and <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=notwork)+
+  geom_vline(aes(xintercept=as.numeric(android$dates[-18])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Door Control & Sensors",
+                               "Door Problems", 
+                               "Logic Board",
+                               "Opener Hardware",
+                               "Other Issues (Human Error)"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                               "#067a38","grey70"))+
+  scale_y_continuous(limits=c(0,0.00003),breaks=seq(0,0.00003,0.00001),
+                     labels=paste0(seq(0,0.003,0.001),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+a <- list(
+  x= as.numeric(android$dates[-c(8,18)])-5,
+  y = 0.00003,
+  text = android$version[-c(8,18)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 11,
+  color = 'darkgreen')
+
+notworkpl_and <- ggplotly(notwork_and) %>% layout(
+  title="Call Volume By Date--Hardware Malfunctioning Issues (Android)",
+         annotations=a,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.23),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 6) %>%
+  style(hovertext = paste("Date:",notwork$date[1:92],
+                          "<br> Users:", notwork$users[1:92], 
+                          "<br> Call Volume:", notwork$CallVolume[1:92], 
+                          "<br> Category:", notwork$Category)[1:92],
+        textposition = "auto",traces=2) %>%
+  style(hovertext = paste("Date:",notwork$date[93:184],
+                          "<br> Users:", notwork$users[93:184], 
+                          "<br> Call Volume:", notwork$CallVolume[93:184], 
+                          "<br> Category:", notwork$Category)[93:184],
+        textposition = "auto",traces=4) %>%
+  style(hovertext = paste("Date:",notwork$date[185:276],
+                          "<br> Users:", notwork$users[185:276], 
+                          "<br> Call Volume:", notwork$CallVolume[185:276], 
+                          "<br> Category:", notwork$Category)[185:276],
+        textposition = "auto",traces=1)
+
+notworkpl_and <- notworkpl_and %>%  
+  style(hovertext = paste("Date:",notwork$date[277:368],
+                          "<br> Users:", notwork$users[277:368], 
+                          "<br> Call Volume:", notwork$CallVolume[277:368], 
+                          "<br> Category:", notwork$Category)[277:368],
+        textposition = "auto",traces=5) %>%
+  style(hovertext = paste("Date:",notwork$date[369:460],
+                          "<br> Users:", notwork$users[369:460], 
+                          "<br> Call Volume:", notwork$CallVolume[369:460], 
+                          "<br> Category:", notwork$Category)[369:460],
+        textposition = "auto",traces=3) %>%
+add_annotations(yref='paper',xref="paper",
+                y=-0.31,x=0.09, text="Issues",showarrow=F) 
+notworkpl_and
+```
+\  
+
+##### Hardware Malfunctioning (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+notwork_ios <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=notwork)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Door Control & Sensors",
+                               "Door Problems", 
+                               "Logic Board",
+                               "Opener Hardware",
+                               "Other Issues (Human Error)"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                               "#067a38","grey70"))+
+  scale_y_continuous(limits=c(0,0.00003),breaks=seq(0,0.00003,0.00001),
+                     labels=paste0(seq(0,0.003,0.001),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(ios$dates[-c(13,14,21,23)])-5,
+  y = 0.00003,
+  text =ios$version[-c(13,14,21,23)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 11,
+  color = 'darkgreen')
+
+notworkpl_ios <- ggplotly(notwork_ios) %>% layout(
+  title="Call Volume By Date--Hardware Malfunctioning Issues (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.23),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 6) %>%
+  style(hovertext = paste("Date:",notwork$date[1:92],
+                          "<br> Users:", notwork$users[1:92], 
+                          "<br> Call Volume:", notwork$CallVolume[1:92], 
+                          "<br> Category:", notwork$Category)[1:92],
+        textposition = "auto",traces=2) %>%
+  style(hovertext = paste("Date:",notwork$date[93:184],
+                          "<br> Users:", notwork$users[93:184], 
+                          "<br> Call Volume:", notwork$CallVolume[93:184], 
+                          "<br> Category:", notwork$Category)[93:184],
+        textposition = "auto",traces=4) %>%
+  style(hovertext = paste("Date:",notwork$date[185:276],
+                          "<br> Users:", notwork$users[185:276], 
+                          "<br> Call Volume:", notwork$CallVolume[185:276], 
+                          "<br> Category:", notwork$Category)[185:276],
+        textposition = "auto",traces=1) %>%
+  style(hovertext = paste("Date:",notwork$date[277:368],
+                          "<br> Users:", notwork$users[277:368], 
+                          "<br> Call Volume:", notwork$CallVolume[277:368], 
+                          "<br> Category:", notwork$Category)[277:368],
+        textposition = "auto",traces=5) %>%
+  style(hovertext = paste("Date:",notwork$date[369:460],
+                          "<br> Users:", notwork$users[369:460], 
+                          "<br> Call Volume:", notwork$CallVolume[369:460], 
+                          "<br> Category:", notwork$Category)[369:460],
+        textposition = "auto",traces=3) %>%
+add_annotations(yref='paper',xref="paper",
+                y=-0.31,x=0.09, text="Issues",showarrow=F)  
+notworkpl_ios
+```
+\   
+
+##### Product Inquiry/ Order/ Return (Android)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+gdo_pi <- TSC_unconn_gdo[which(TSC_unconn_gdo$Issue=="product inquiry"),]
+gdo_or <- TSC_unconn_gdo[which(TSC_unconn_gdo$Issue=="order/return"),]
+gdo_pi$Category <- recode_factor(gdo_pi$Resolution, "provide electrical requirements"
+                                 ="Device info/reqs",
+"provide information regarding lcd display"="Device info/reqs",
+"provide measurements of the opener"="Device info/reqs",
+"provide the door requirements"="Device info/reqs",
+"provided homekit information"= "Device info/reqs",
+"provide compatibility"="Compatibility info",
+"provide registration/warranty information"="Warranty info",
+"provide tracking information"="Tracking info",
+"provide availability"="Availability info",
+"provide pricing"="Pricing info",
+"provide alternative item"="Alternative/Return item",
+ "information provided" ="Device info/reqs",
+"information provided - 1"="Others (mkt/cpn)",
+"na"="Device info/reqs"
+                                   )
+
+gdo_or$Category<- recode_factor(gdo_or$Resolution, 
+"provided order tracking information"="Tracking info",
+"provided quote/pricing"="Pricing info","provided return order status"="Tracking info",
+"return placed"="Alternative/Return item",
+"part/accessory missing in carton - accommodation order placed"="Alternative/Return item",
+"order placed"="Make order","order declined"="Make order",
+"unit is defective and in warranty - return order placed"="Alternative/Return item" 
+                                   )
+
+xws <- gdo_or[which(gdo_or$Resolution=="na"),]
+xws2 <- gdo_or[which(gdo_or$Resolution!="na"),]
+xws$Category <- as.character(xws$Category )
+xws$Category <- "Others (mkt/cpn)"
+
+gdo_or <- rbind(xws,xws2)
+gdo_pior <- rbind(gdo_pi,gdo_or)
+gdo_pior$Category <- as.factor(gdo_pior$Category)
+gdo_pior$Category <- recode_factor(gdo_pior$Category,
+"Device info/reqs"="Device/Warranty info",
+"Warranty info"="Device/Warranty info","Tracking info"="Order info",
+"Make order"="Order info","Others (mkt/cpn)"="Order info")
+
+gdo_pior$`Date/Time Opened` <- date(gdo_pior$`Date/Time Opened`)
+pior <- gdo_pior %>% group_by(`Date/Time Opened`,Category) %>% summarize(CallVolume=n())
+pior$Category <- as.factor(as.character(pior$Category))
+cat <- unlist(unique(pior$Category))
+ns_0 <- {}
+for (i in 1:length(cat)) {
+  ns <- pior[which(pior$Category==cat[i]),]
+  ns <- xts(x=ns[,-1],order.by=ns$`Date/Time Opened`)
+  ns <- merge(ns,zoo(NULL,seq(as.Date("2017/03/10"),as.Date("2018/12/09"),by="day")),all=TRUE)
+  ns$CallVolume[which(is.na(ns$CallVolume))] <-0
+  ep <- endpoints(ns, on = "weeks")
+  ns <- period.sum(ns[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ns)
+  index <- index(ns)
+  ns <- data.frame(date=index,CallVolume=cr)
+  ns$Category <- cat[i]
+  assign(paste("ns",i,sep="_"),rbind(get(paste("ns",i-1,sep="_")),ns))
+}
+rm(ns_1,ns_2,ns_3,ns_4,ns,ns_5,ns_0)
+pior <- ns_6
+pior$users <-rep(users$Count,6)
+pior$CallVolumePerc <- pior$CallVolume/pior$users
+
+pior_and <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=pior)+
+  geom_vline(aes(xintercept=as.numeric(android$dates[-18])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Alternative/Return item",
+                               "Availability Info", 
+                               "Compatibility Info",
+                               "Device/Warranty Info",
+                               "Order Info",
+                               "Pricing Info"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                               "#067a38","#0aadce","#9ea512"))+
+  scale_y_continuous(limits=c(0,0.00003),breaks=seq(0,0.00003,0.00001),
+                     labels=paste0(seq(0,0.003,0.001),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+a <- list(
+  x= as.numeric(android$dates[-c(8,18)])-5,
+  y = 0.00003,
+  text = android$version[-c(8,18)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 11,
+  color = 'darkgreen')
+
+piorpl_and <- ggplotly(pior_and) %>% layout(
+  title="Call Volume By Date--Order/Return/Product Inquiries (Android)",
+         annotations=a,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.23),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 7) %>%
+  style(hovertext = paste("Date:",pior$date[1:92],
+                          "<br> Users:", pior$users[1:92], 
+                          "<br> Call Volume:", pior$CallVolume[1:92], 
+                          "<br> Category:", pior$Category)[1:92],
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",pior$date[93:184],
+                          "<br> Users:", pior$users[93:184], 
+                          "<br> Call Volume:", pior$CallVolume[93:184], 
+                          "<br> Category:", pior$Category)[93:184],
+        textposition = "auto",traces=6) %>%
+  style(hovertext = paste("Date:",pior$date[185:276],
+                          "<br> Users:", pior$users[185:276], 
+                          "<br> Call Volume:", pior$CallVolume[185:276], 
+                          "<br> Category:", pior$Category)[185:276],
+        textposition = "auto",traces=1) 
+
+piorpl_and  <- piorpl_and  %>%
+    style(hovertext = paste("Date:",pior$date[277:368],
+                          "<br> Users:", 
+                          pior$users[277:368], 
+                          "<br> Call Volume:", 
+                          pior$CallVolume[277:368], 
+                          "<br> Category:", pior$Category)[277:368],
+        textposition = "auto",traces=4) %>%
+      style(hovertext = paste("Date:",pior$date[369:460],
+                          "<br> Users:", 
+                          pior$users[369:460], 
+                          "<br> Call Volume:", 
+                          pior$CallVolume[369:460], 
+                          "<br> Category:", pior$Category)[369:460],
+        textposition = "auto",traces=2) %>%
+       style(hovertext = paste("Date:",pior$date[461:552],
+                          "<br> Users:", pior$users[461:552], 
+                          "<br> Call Volume:", 
+                          pior$CallVolume[461:552], 
+                          "<br> Category:", pior$Category)[461:552],
+        textposition = "auto",traces=5) %>%
+  add_annotations(yref='paper',xref="paper",
+                y=-0.31,x=-0.04, text="Issues",showarrow=F) 
+piorpl_and
+```
+\  
+
+##### Product Inquiry/ Order/ Return (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+pior_ios <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=pior)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Alternative/Return item",
+                               "Availability Info", 
+                               "Compatibility Info",
+                               "Device/Warranty Info",
+                               "Order Info",
+                               "Pricing Info"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                               "#067a38","#0aadce","#9ea512"))+
+  scale_y_continuous(limits=c(0,0.00003),breaks=seq(0,0.00003,0.00001),
+                     labels=paste0(seq(0,0.003,0.001),"%"))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+ 
+  theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(ios$dates[-c(13,14,21,23)])-5,
+  y = 0.00003,
+  text =ios$version[-c(13,14,21,23)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 11,
+  color = 'darkgreen')
+
+piorpl_ios <- ggplotly(pior_ios) %>% layout(
+  title="Call Volume By Date--Order/Return/Product Inquiries (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+                       xanchor = "center", x = 0.5,y=-0.23),
+         font=t) %>% 
+  style(hoverinfo = "none", traces = 7) %>%
+  style(hovertext = paste("Date:",pior$date[1:92],
+                          "<br> Users:", pior$users[1:92], 
+                          "<br> Call Volume:", pior$CallVolume[1:92], 
+                          "<br> Category:", pior$Category)[1:92],
+        textposition = "auto",traces=3) %>%
+  style(hovertext = paste("Date:",pior$date[93:184],
+                          "<br> Users:", pior$users[93:184], 
+                          "<br> Call Volume:", pior$CallVolume[93:184], 
+                          "<br> Category:", pior$Category)[93:184],
+        textposition = "auto",traces=6) %>%
+  style(hovertext = paste("Date:",pior$date[185:276],
+                          "<br> Users:", pior$users[185:276], 
+                          "<br> Call Volume:", pior$CallVolume[185:276], 
+                          "<br> Category:", pior$Category)[185:276],
+        textposition = "auto",traces=1) %>%
+    style(hovertext = paste("Date:",pior$date[277:368],
+                          "<br> Users:", pior$users[277:368], 
+                          "<br> Call Volume:", pior$CallVolume[277:368], 
+                          "<br> Category:", pior$Category)[277:368],
+        textposition = "auto",traces=4) %>%
+      style(hovertext = paste("Date:",pior$date[369:460],
+                          "<br> Users:", pior$users[369:460], 
+                          "<br> Call Volume:", pior$CallVolume[369:460], 
+                          "<br> Category:", pior$Category)[369:460],
+        textposition = "auto",traces=2) %>%
+       style(hovertext = paste("Date:",pior$date[461:552],
+                          "<br> Users:", pior$users[461:552], 
+                          "<br> Call Volume:", pior$CallVolume[461:552], 
+                          "<br> Category:", pior$Category)[461:552],
+        textposition = "auto",traces=5) %>%
+add_annotations(yref='paper',xref="paper",
+                y=-0.31,x=-0.04, text="Issues",showarrow=F) 
+piorpl_ios
+```
+\  
+
+##### MyQ Account (Android)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+gdo_myqacc <- TSC_unconn_gdo[which(TSC_unconn_gdo$Issue=="myq account is not working as expected"),]
+gdo_myqacc$Category <- gdo_myqacc$Resolution
+gdo_myqacc$Category[grep("password|registration|login",gdo_myqacc$Resolution)] <- "Sign up/in"
+gdo_myqacc$Category[grep("serial",gdo_myqacc$Resolution)] <- "Serial Number"
+gdo_myqacc$Category[grep("^unable to",gdo_myqacc$Resolution)] <- "Link to Other Device"
+gdo_myqacc$Category[grep("does not respond from app - remove and read to account",gdo_myqacc$Resolution)] <- "Not Responding to App"
+gdo_myqacc$Category[grep("compatible device|myq device|replace device|replace gateway|opener|safety sensors|logic board",gdo_myqacc$Resolution)] <- "Device Not Working"
+gdo_myqacc$Category[grep("insight|firmware|learn button",gdo_myqacc$Resolution)] <- "Human Error"
+gdo_myqacc$Category <- recode_factor(gdo_myqacc$Category, "Human Error"="Minor Issues","Link to Other Device"="Minor Issues",
+                                     "na"="Minor Issues")
+
+gdo_myqacc$`Date/Time Opened` <- date(gdo_myqacc$`Date/Time Opened`)
+myqacc <- gdo_myqacc %>% group_by(`Date/Time Opened`,Category) %>% summarize(CallVolume=n())
+myqacc$Category <- as.factor(as.character(myqacc$Category))
+cat <- unlist(unique(myqacc$Category))
+rm(ns_6)
+
+ns_0 <- {}
+for (i in 1:length(cat)) {
+  ns <- myqacc[which(myqacc$Category==cat[i]),]
+  ns <- xts(x=ns[,-1],order.by=ns$`Date/Time Opened`)
+  ns <- merge(ns,zoo(NULL,seq(as.Date("2017/03/10"),as.Date("2018/12/09"),by="day")),all=TRUE)
+  ns$CallVolume[which(is.na(ns$CallVolume))] <-0
+  ep <- endpoints(ns, on = "weeks")
+  ns <- period.sum(ns[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ns)
+  index <- index(ns)
+  ns <- data.frame(date=index,CallVolume=cr)
+  ns$Category <- cat[i]
+  assign(paste("ns",i,sep="_"),rbind(get(paste("ns",i-1,sep="_")),ns))
+}
+rm(ns_1,ns_2,ns_3,ns_4,ns,ns_0)
+myqacc <- ns_5
+myqacc$users <-rep(users$Count,5)
+myqacc$CallVolumePerc <- myqacc$CallVolume/myqacc$users
+
+myqacc_and <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,
+                                       color=Category),data=myqacc)+
+  geom_vline(aes(xintercept=
+                   as.numeric(android$dates[-18])),
+             linetype=2, 
+             colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Device Not Working",
+                               "Minor Issues", 
+                               "Not Responding to App",
+                               "Serial Number","Sign Up/In"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                                "#067a38","#0aadce"))+
+  scale_y_continuous(limits=c(0,0.00001),
+                     breaks=seq(0,0.00001,0.000005),
+                     labels=paste0(seq(0,0.001,0.0005),"%"))+
+  scale_x_date(date_breaks = "1 month", 
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+a <- list(
+  x= as.numeric(android$dates[-c(8,18)])-5,
+  y = 0.00001,
+  text = android$version[-c(8,18)],
+  textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+
+myqaccplt_and <- ggplotly(myqacc_and) %>% 
+  layout(title="Call Volume By Date--MyQ Account Issues (Android)",
+         annotations=a,
+         legend = list(orientation = "h",
+                       xanchor = "center", 
+                       x = 0.5,y=-0.23),font=t)  %>% 
+  style(hoverinfo = "none", traces = 6) %>%
+  style(hovertext = paste("Date:",myqacc$date[1:92],
+                          "<br> Users:", myqacc$users[1:92], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[1:92], 
+                          "<br> Category:",
+                          myqacc$Category[1:92]),
+        textposition = "auto",traces=2) %>%
+  style(hovertext = paste("Date:",myqacc$date[93:184],
+                          "<br> Users:", myqacc$users[93:184], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[93:184], 
+                          "<br> Category:",
+                          myqacc$Category[93:184]),
+        textposition = "auto",traces=4) %>%
+    style(hovertext = paste("Date:",myqacc$date[185:276],
+                          "<br> Users:", myqacc$users[185:276], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[185:276], 
+                          "<br> Category:",
+                          myqacc$Category[185:276]),
+        textposition = "auto",traces=3) 
+
+myqaccplt_and <- myqaccplt_and %>% 
+      style(hovertext = paste("Date:",myqacc$date[277:368],
+                          "<br> Users:", myqacc$users[277:368], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[277:368], 
+                          "<br> Category:",
+                          myqacc$Category[277:368]),
+        textposition = "auto",traces=1) %>%
+        style(hovertext = paste("Date:",myqacc$date[369:460],
+                          "<br> Users:", myqacc$users[369:460], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[369:460], 
+                          "<br> Category:",
+                          myqacc$Category[369:460]),
+        textposition = "auto",traces=5) %>%
+  add_annotations(yref='paper',xref="paper",
+                  y=-0.31,x=0.02, text="Issues",
+                  showarrow=F) 
+myqaccplt_and
+```
+\  
+
+##### MyQ Account (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+myqacc_ios <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,
+                                       color=Category),data=myqacc)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Device Not Working",
+                               "Minor Issues", 
+                               "Not Responding to App",
+                               "Serial Number","Sign Up/In"),
+                      values=c("#b942f4","#dd3e1f","#1053b2",
+                                "#067a38","#0aadce"))+
+  scale_y_continuous(limits=c(0,0.00001),
+                     breaks=seq(0,0.00001,0.000005),
+                     labels=paste0(seq(0,0.001,0.0005),"%"))+
+  scale_x_date(date_breaks = "1 month", 
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(ios$dates[-c(13,14,21,23)])-5,
+  y = 0.00001,
+  text =ios$version[-c(13,14,21,23)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+
+myqaccplt_ios <- ggplotly(myqacc_ios) %>% 
+  layout(title="Call Volume By Date--MyQ Account Issues (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+                       xanchor = "center", 
+                       x = 0.5,y=-0.23),font=t)  %>% 
+  style(hoverinfo = "none", traces = 6) %>%
+  style(hovertext = paste("Date:",myqacc$date[1:92],
+                          "<br> Users:", myqacc$users[1:92], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[1:92], 
+                          "<br> Category:",
+                          myqacc$Category[1:92]),
+        textposition = "auto",traces=2) %>%
+  style(hovertext = paste("Date:",myqacc$date[93:184],
+                          "<br> Users:", myqacc$users[93:184], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[93:184], 
+                          "<br> Category:",
+                          myqacc$Category[93:184]),
+        textposition = "auto",traces=4) %>%
+    style(hovertext = paste("Date:",myqacc$date[185:276],
+                          "<br> Users:", myqacc$users[185:276], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[185:276], 
+                          "<br> Category:",
+                          myqacc$Category[185:276]),
+        textposition = "auto",traces=3) %>%
+      style(hovertext = paste("Date:",myqacc$date[277:368],
+                          "<br> Users:", myqacc$users[277:368], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[277:368], 
+                          "<br> Category:",
+                          myqacc$Category[277:368]),
+        textposition = "auto",traces=1) %>%
+  style(hovertext = paste("Date:",myqacc$date[369:460],
+                          "<br> Users:", myqacc$users[369:460], 
+                          "<br> Call Volume:", 
+                          myqacc$CallVolume[369:460], 
+                          "<br> Category:",
+                          myqacc$Category[369:460]),
+        textposition = "auto",traces=5) %>%
+  add_annotations(yref='paper',xref="paper",
+                  y=-0.31,x=0.02, text="Issues",
+                  showarrow=F) 
+myqaccplt_ios
+```
+\  
+
+##### MyQ Hardware (Android)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+gdo_myqhd <- 
+  TSC_unconn_gdo[which(TSC_unconn_gdo$Issue=="myq hardware does not work as expected"),]
+gdo_myqhd$Category <- gdo_myqhd$Resolution
+gdo_myqhd$Category[grep("door sensor",gdo_myqhd$Resolution)] <- 
+  "Door Sensor"
+gdo_myqhd$Category[grep("setup.myqdevice.com",gdo_myqhd$Category)] <-
+  "setup.mydevice.com"
+gdo_myqhd$Category[grep("bluetooth",gdo_myqhd$Category)] <- 
+  "Connect bluetooth"
+gdo_myqhd$Category[grep("router",gdo_myqhd$Category)] <- 
+  "Router"
+gdo_myqhd$Category[grep("battery",gdo_myqhd$Category)] <- 
+  "Battery"
+gdo_myqhd$Category[grep("replace gateway|replace hub|
+                        replacement gateway|replacement hub|
+                        logic board|gateway unresponsive",gdo_myqhd$Category)]<- 
+  "Gateway/Hub"
+gdo_myqhd$Category[grep("network|wi-fi",gdo_myqhd$Category)] <-
+  "wi-fi/network"
+gdo_myqhd$Category[grep("firewall",gdo_myqhd$Category)] <- 
+  "firewall"
+
+gdo_myqhd$Category[grep("gdo|outlet",gdo_myqhd$Category)] <- 
+  "GDO issues"
+gdo_myqhd$Category[grep("interfer",gdo_myqhd$Category)] <- 
+  "Interference"
+gdo_myqhd$Category <- recode_factor(gdo_myqhd$Category, 
+            "firewall"="Wifi network", 
+"myq-nnn not broadcast(not showing) - relocate product during setup"=
+  "Wifi network",
+             "wi-fi/network"="Wifi network",
+            "Door Sensor"="Sensor/GDO/Gateway/Hub",
+           "Gateway/Hub" ="Sensor/GDO/Gateway/Hub",
+           "Battery"="Sensor/GDO/Gateway/Hub",
+           "GDO issues" ="Sensor/GDO/Gateway/Hub",
+           "Router"="Sensor/GDO/Gateway/Hub",
+           "Interference"="Other Issues",
+             "setup.mydevice.com"="Other Issues",
+                      "na"="Other Issues",
+         "servers are down - explain situation"=
+  "Other Issues"
+)
+
+gdo_myqhd$`Date/Time Opened` <- 
+  date(gdo_myqhd$`Date/Time Opened`)
+myqhd <- gdo_myqhd %>% 
+  group_by(`Date/Time Opened`,Category)%>% 
+  summarize(CallVolume=n())
+myqhd$Category <- as.factor(as.character(myqhd$Category))
+cat <- unlist(unique(myqhd$Category))
+ns_0 <- {}
+for (i in 1:length(cat)) {
+  ns <- myqhd[which(myqhd$Category==cat[i]),]
+  ns <- xts(x=ns[,-1],order.by=ns$`Date/Time Opened`)
+  ns <- merge(ns,zoo(NULL,seq(as.Date("2017/03/10"),
+                              as.Date("2018/12/09"),by="day")),
+              all=TRUE)
+  ns$CallVolume[which(is.na(ns$CallVolume))] <-0
+  ep <- endpoints(ns, on = "weeks")
+  ns <- period.sum(ns[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ns)
+  index <- index(ns)
+  ns <- data.frame(date=index,CallVolume=cr)
+  ns$Category <- cat[i]
+  assign(paste("ns",i,sep="_"),rbind(
+    get(paste("ns",i-1,sep="_")),ns))
+}
+rm(ns_1,ns_2,ns_3,ns,ns_0)
+myqhd <- ns_4
+myqhd$users <-rep(users$Count,4)
+myqhd$CallVolumePerc <- myqhd$CallVolume/myqhd$users
+
+myqhd_and <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),
+            data=myqhd)+
+  geom_vline(aes(xintercept=as.numeric(android$dates[-18])),
+             linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c(
+    "Bluetooth Connection","Other Issues", 
+    "Sensor/GDO/GW/Hub","Wifi Network"),
+    values=c("#b942f4","#dd3e1f","#1053b2","#067a38"))+
+  scale_y_continuous(limits=c(0,0.000015),
+                     breaks=seq(0,0.000015,0.000005),
+                     labels=paste0(seq(0,0.0015,0.0005),
+                                   "%"))+
+  scale_x_date(date_breaks = "1 month",
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+a <- list(
+  x= as.numeric(android$dates[-c(8,18)])-5,
+  y = 0.000015,
+  text = android$version[-c(8,18)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+
+myqhdplt_and <- ggplotly(myqhd_and) %>% 
+  layout(title="Call Volume By Date--MyQ Hardware Issues (Android)",
+         annotations=a,legend = list(orientation = "h",
+                                     xanchor = "center",
+                                     x = 0.5,y=-0.23),font=t)  %>% 
+  style(hoverinfo = "none", traces = 5) %>%
+  style(hovertext = paste("Date:",myqhd$date[1:92],
+                          "<br> Users:", myqhd$users[1:92], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[1:92], 
+                          "<br> Category:",
+                          myqhd$Category[1:92]),
+        textposition = "auto",traces=2) %>%
+  style(hovertext = paste("Date:",myqhd$date[93:184],
+                          "<br> Users:", myqhd$users[93:184], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[93:184], 
+                          "<br> Category:",
+                          myqhd$Category[93:184]),
+        textposition = "auto",traces=1)
+
+myqhdplt_and <- myqhdplt_and %>% 
+  style(hovertext = paste("Date:",myqhd$date[185:276],
+                          "<br> Users:", myqhd$users[185:276], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[185:276], 
+                          "<br> Category:",
+                          myqhd$Category[185:276]),
+        textposition = "auto",traces=4) %>% 
+  style(hovertext = paste("Date:",myqhd$date[277:368],
+                          "<br> Users:", myqhd$users[277:368], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[277:368], 
+                          "<br> Category:",
+                          myqhd$Category[277:368]),
+        textposition = "auto",traces=3) %>%
+  add_annotations(yref='paper',xref="paper",
+                  y=-0.31,x=0.10, text="Issues",showarrow=F)
+  
+myqhdplt_and
+```
+\  
+
+##### MyQ Hardware (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+myqhd_ios <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,
+                                       color=Category),data=myqhd)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+ scale_color_manual (labels=c(
+    "Bluetooth Connection","Other Issues", 
+    "Sensor/GDO/GW/Hub","Wifi Network"),
+    values=c("#b942f4","#dd3e1f","#1053b2","#067a38"))+
+  scale_y_continuous(limits=c(0,0.000015),
+                     breaks=seq(0,0.000015,0.000005),
+                     labels=paste0(seq(0,0.0015,0.0005),
+                                   "%"))+
+  scale_x_date(date_breaks = "1 month",
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(ios$dates[-c(13,14,21,23)])-5,
+  y = 0.000015,
+  text =ios$version[-c(13,14,21,23)],textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+
+myqhdplt_ios <- ggplotly(myqhd_ios) %>% 
+  layout(title="Call Volume By Date--MyQ Hardware Issues (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+                       xanchor = "center", 
+                       x = 0.5,y=-0.23),font=t)  %>% 
+  style(hoverinfo = "none", traces = 5) %>%
+  style(hovertext = paste("Date:",myqhd$date[1:92],
+                          "<br> Users:", myqhd$users[1:92], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[1:92], 
+                          "<br> Category:",
+                          myqhd$Category[1:92]),
+        textposition = "auto",traces=2) %>%
+  style(hovertext = paste("Date:",myqhd$date[93:184],
+                          "<br> Users:", myqhd$users[93:184], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[93:184], 
+                          "<br> Category:",
+                          myqhd$Category[93:184]),
+        textposition = "auto",traces=1) %>%
+  style(hovertext = paste("Date:",myqhd$date[185:276],
+                          "<br> Users:", myqhd$users[185:276], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[185:276], 
+                          "<br> Category:",
+                          myqhd$Category[185:276]),
+        textposition = "auto",traces=4) %>%
+  style(hovertext = paste("Date:",myqhd$date[277:368],
+                          "<br> Users:", myqhd$users[277:368], 
+                          "<br> Call Volume:", 
+                          myqhd$CallVolume[277:368], 
+                          "<br> Category:",
+                          myqhd$Category[277:368]),
+        textposition = "auto",traces=3) %>%
+  add_annotations(yref='paper',xref="paper",
+                  y=-0.31,x=0.10, text="Issues",
+                  showarrow=F) 
+myqhdplt_ios
+```
+\  
+
+##### Low Frequency Issues (Android)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+gdo_lf <- TSC_unconn_gdo[which(TSC_unconn_gdo$Issue 
+                             %in% 
+c("alerts and notifications do not work as expected",
+"installation", "na","programming to a gate",
+"programming to a gdo")),]
+gdo_lf$Category <- gdo_lf$Issue
+gdo_lf$Category <- recode_factor(gdo_lf$Category, 
+"alerts and notifications do not work as expected"=
+"Alerts/Notifications does not work", 
+ "na"="Other Issues",
+"programming to a gate"="Other Issues",
+"programming to a gdo"="Other Issues")
+
+gdo_lf$`Date/Time Opened` <- date(gdo_lf$`Date/Time Opened`)
+lf <- gdo_lf %>% 
+  group_by(`Date/Time Opened`,Category) %>% 
+  summarize(CallVolume=n())
+
+lf$Category <- as.factor(as.character(lf$Category))
+cat <- unlist(unique(lf$Category))
+ns_0 <- {}
+for (i in 1:length(cat)) {
+  ns <- lf[which(lf$Category==cat[i]),]
+  ns <- xts(x=ns[,-1],order.by=ns$`Date/Time Opened`)
+  ns <- merge(ns,zoo(NULL,
+                     seq(as.Date("2017/03/10"),
+                              as.Date("2018/12/09"),by="day")),
+              all=TRUE)
+  ns$CallVolume[which(is.na(ns$CallVolume))] <-0
+  ep <- endpoints(ns, on = "weeks")
+  ns <- period.sum(ns[,"CallVolume"],INDEX=ep)
+  cr<- coredata(ns)
+  index <- index(ns)
+  ns <- data.frame(date=index,CallVolume=cr)
+  ns$Category <- cat[i]
+  assign(paste("ns",i,sep="_"),
+         rbind(get(paste("ns",i-1,sep="_")),ns))
+}
+rm(ns_1,ns,ns_0)
+lf<- ns_2
+lf$users <-rep(users$Count,2)
+lf$CallVolumePerc <- lf$CallVolume/lf$users
+
+lf_and <- ggplot() + 
+  geom_line(aes(x=date,y=CallVolumePerc,color=Category),data=lf)+
+  geom_vline(aes(xintercept=as.numeric(android$dates[-18])),
+             linetype=2, colour="#078205",alpha=0.5)+
+  scale_color_manual (labels=c("Alerts/Notifications",
+                               "Installiation"),
+                      values=c("#b942f4","#dd3e1f"))+
+  scale_y_continuous(limits=c(0,0.00003),
+                     breaks=seq(0,0.00003,0.00001),
+                     labels=paste0(seq(0,0.003,0.001),
+                                   "%"))+
+  scale_x_date(date_breaks = "1 month",
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+a <- list(
+  x= as.numeric(
+    android$dates[-c(8,18)])-5,
+  y = 0.00003,
+  text = android$version[-c(8,18)],
+  textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+
+lf <- lf[order(lf$Category),]
+lfpl_and <- ggplotly(lf_and) %>% 
+  layout(title="Call Volume By Date--Low Freq Issues (Android)",
+annotations=a,
+legend = list(orientation = "h",
+ xanchor = "center", 
+  x = 0.5,y=-0.23),font=t)  %>% 
+  style(hoverinfo = "none", traces = 3) %>%
+  style(hovertext = paste("Date:",lf$date[1:92],
+                          "<br> Users:", lf$users[1:92],
+                          "<br> Call Volume:",lf$CallVolume[1:92] ,
+                          "<br> Category:", lf$Category[1:92]),
+        traces=1) %>%
+  style(hovertext = paste("Date:",lf$date[93:184],
+                          "<br> Users:", lf$users[93:184],
+                          "<br> Call Volume:",lf$CallVolume[93:184] ,
+                          "<br> Category:", lf$Category[93:184]),
+        traces=2) %>%
+  add_annotations(yref='paper',xref="paper",y=-0.31,x=0.23, 
+                  text="Issues",showarrow=F) 
+
+lfpl_and
+```
+\  
+
+##### Low Frequency Issues (iOS)
+```{r,fig.width=9,fig.height=4.5,fig.align="left"}
+lf_ios <- ggplot() + geom_line(aes(x=date,y=CallVolumePerc,
+                                       color=Category),data=lf)+
+  geom_vline(aes(xintercept=as.numeric(ios$dates[-23])),
+         linetype=2, colour="#078205",alpha=0.5)+
+ scale_color_manual (labels=c("Alerts/Notifications",
+                               "Installiation"),
+                      values=c("#b942f4","#dd3e1f"))+
+  scale_y_continuous(limits=c(0,0.00003),
+                     breaks=seq(0,0.00003,0.00001),
+                     labels=paste0(seq(0,0.003,0.001),
+                                   "%"))+
+  scale_x_date(date_breaks = "1 month",
+               date_labels =  "%b %Y")+ theme_bw()+
+  ylab("Call Volume Percentage") + xlab("Date") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.title=element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),
+        legend.position="top")
+
+b <- list(
+  x= as.numeric(
+    ios$dates[-c(13,14,21,23)])-5,
+  y = 0.00003,
+  text =ios$version[-c(13,14,21,23)],
+  textangle=-90,
+  showarrow = F,
+  xref = "x",
+  yref = "y"
+)
+
+t <- list(
+  family = "sans serif",
+  size = 15,
+  color = 'darkgreen')
+
+lfpl_ios <- ggplotly(lf_ios) %>% 
+  layout(title="Call Volume By Date--Low Freq Issues (ios)",
+         annotations=b,
+         legend = list(orientation = "h",
+ xanchor = "center", 
+  x = 0.5,y=-0.25),font=t)  %>% 
+  style(hoverinfo = "none", traces = 3) %>%
+  style(hovertext = paste("Date:",lf$date[1:92],
+                          "<br> Users:", lf$users[1:92],
+                          "<br> Call Volume:",lf$CallVolume[1:92] ,
+                          "<br> Category:", lf$Category[1:92]),
+        traces=1) %>%
+  style(hovertext = paste("Date:",lf$date[93:184],
+                          "<br> Users:", lf$users[93:184],
+                          "<br> Call Volume:",lf$CallVolume[93:184] ,
+                          "<br> Category:", lf$Category[93:184]),
+        traces=2) %>%
+  add_annotations(yref='paper',xref="paper",y=-0.31,x=0.23, 
+                  text="Issues",showarrow=F) 
+lfpl_ios
+```
+
+\  
+
+\  
+
+## 4. Major Findings -- Devices that cannot be connected to WIFI
+
+* Like Wi-fi connectable products, users of Chamberlain's products that cannot be connected to wifi were having problems adding devices. However, the call volume related to users not knowing how to add devices to their myq account started to decrease after September 2018. Based on the above finding,we would suggest Chamberlain investigate what might have caused this decrease in call volume. If possible, Chamberlain may utilize their findings to reduce the number of calls related to users adding devices to their wifi connectable products (i.e. calls related to users adding devices to their wifi connectable products is increasing)
+
+\  
+
+* Unlike Wi-fi connectable products, calls related to non-connectable devices' hardware (opener, door control, door, gears, logic board ,etc.) malfunctioning is increasing over time. Although we don't think hardware issues are related to a new app version being released, seeing the call volume increases still concerns us.
+
+\  
+
+* Like wifi connectable products, starting from Jun 2018, there was a stark increase in calls related to customers asking for device compatibility or returning the non-connectable products they bought.However, the call volume didn't decrease in November (Remember: The calls related to customers returning their wifi connectable devices started to go down in November 2018. But the calls related to users returning their non-connectable devices continued growing). This pattern is concerning. It indicates there is still an ongoing problem related to non-wifi-connectable garage door openers, and Chamberlain's customers are not satisfied with the company's products.
+
+\  
+
+* Unlike Wi-fi connectable devices, the calls related to users asking for guidance on how to install their non-wifi-connectable hardware (door controls, garage door openers) is increasing over time. Maybe Chamberlain should consider publishing more instructions on their website to help their customers install their non-wifi-connectable devices.
+
+\  
+
+
+# B. App Reviews Descriptive Analysis
+## 1. Preliminary Steps
+### 1.1 Reading in the data
+```{r,message=FALSE, warning=FALSE}
+library(kableExtra)
+library(hunspell)
+library(cld2)
+library(cld3)
+library(stringr)
+library(tm)
+library(rJava)
+library(qdap)
+library(ggplot2)
+library(tidyr)
+library(readxl)
+library(dplyr)
+Reviews <- read_excel("App_Reviews_20160101-20181210.xlsx")
+```
+
+\  
+ 
+### 1.2 Use Google Chrome Langauge Detection Engines (both Version 2 and Version 3 ) to Extract the Reviews that are written in English/ Spanish.
+Note that these language detection engines are dumb. 
+```{r}
+Reviews <- Reviews %>% mutate(cld2 = cld2::detect_language(text = Review, plain_text = FALSE), cld3 = cld3::detect_language(text = Review))
+
+Reviews$Language <- NA
+Reviews$Language[which(Reviews$cld2=="en"|Reviews$cld3=="en")] <- "en"
+Reviews$Language[which(is.na(Reviews$cld2)|is.na(Reviews$cld3))] <- "en"
+Reviews$Language[which(is.na(Reviews$Language))] <- "sp"
+Reviews <- Reviews %>% select(-c(cld2,cld3))
+RevEn <- Reviews[which(Reviews$Language=="en"),]
+RevSp <- Reviews[which(Reviews$Language=="sp"),]
+```
+
+\  
+
+### 1.3 Preliminary Cleaning
+Before I correct the misspellings, I will clean and standardize the text data first so that I can use Regular Expressions.
+```{r}
+RevEn$ExtEmot <- str_count(RevEn$Review,"!")
+RevEn$Review <- RevEn$Review %>% replace_number() %>% 
+  replace_abbreviation() %>% replace_contraction() %>% 
+   str_replace_all("\\(|\\)", "") %>% tolower()
+```
+
+I will then try to clean up some common misspellings. I decided to clean up these common misspellings first because the package in R for Misspelling correction is also unreliable sometimes. 
+```{r}
+RevEn$Review <- RevEn$Review %>% str_replace_all("wifi","WiFi") %>% str_replace_all("fourg","four G") %>%
+  str_replace_all("passcode","pass code") %>% str_replace_all("plz","please") %>% str_replace_all("dooe","door") %>%
+  str_replace_all("wouldnt","wouldn't") %>% str_replace_all("theres","there is") %>% str_replace_all("didnt","didn't")%>% 
+  str_replace_all("opne","open") %>% str_replace_all("tenp","ten pm") %>% str_replace_all("withninexeightdoors","within eight doors") %>%
+  str_replace_all("devicestateformatstring","device state format string")
+
+RevEn$Review <- gsub("\\-","",RevEn$Review)
+RevEn$Review <- gsub(" ap "," app ",RevEn$Review)
+RevEn$Review <- gsub("^ap ","app ",RevEn$Review)
+RevEn$Review <- gsub(" ap\\."," app.",RevEn$Review)
+RevEn$Review <- gsub(" ap\\,"," app,",RevEn$Review)
+RevEn$Review <- gsub("inturn","instead",RevEn$Review)
+RevEn$Review <- gsub("msg","message",RevEn$Review)
+RevEn$Review <- gsub("hel","help",RevEn$Review)
+RevEn$Review <- gsub("tweek","tweak",RevEn$Review)
+RevEn$Review <- gsub("hastles","hassles",RevEn$Review)
+RevEn$Review <- gsub(" iam "," i am ",RevEn$Review)
+RevEn$Review <- gsub("lastest ","last ",RevEn$Review)
+RevEn$Review <- gsub(" orngate "," or gate ",RevEn$Review)
+RevEn$Review <- gsub("onehr","one hr",RevEn$Review)
+```
+
+\  
+
+### 1.4 Some Hidden Spanish Reviews.
+Since the language detection engines are not reliable, it will not be a surprise that some reviews written in spanish are ignored and undetected. I will fix the issue before I move further.
+```{r}
+### Extracting the hidden spanish reviews
+RevEn$Language[grep(" muy |^muy | muy\\.| muy\\,|bueno|buena|funktioniert| es |buenísimo|recomendado",RevEn$Review)] <-"sp"
+othersp <- RevEn[which(RevEn$Language=="sp"),]
+RevSp <- rbind(RevSp,othersp[,-ncol(othersp)])
+RevEn <- RevEn[which(RevEn$Language=="en"),]
+```
+Now we have our English Reviews (RevEn) and our Spanish Reviews (RevSp).
+
+\  
+
+### 1.5. Correcting Misspellings
+####  1.5.1Custom Reference Dictionary
+When Hunspell automatically check whether a word in a given string is mispelled or not, it refers to the US dictionary. Words and expressions from urban dictionary (like ios, ifttt) are counted as words being misspelled. Therefore, I will create a custom dictionary so that Hunspell can ignore the words I specefied when checking for misspelling.
+```{r}
+RevEn$Spelling <- 0
+custdict <- c("personalization","liftmaster","myq","iphones","iphone","aaa","wifi","lites","lite",
+              "pc","www","iftt","samsung","config","fyi","ethernet","cigbu","ui","ifttt",
+              "geofencing","az","très" ,"bien","alexa","realise","wize","ie","ux","ssid","nerf","bam","siri",
+              "mins","led","leds","seight","ssix","ios","lte","faceid","ap","iot","touchid","id","os",
+              "youtube","tim","smartthings","sfour","marantec","nav","adt","bnine","xl","oreo","dimed","myqgthree",
+              "gthree")
+```
+
+\  
+
+#### 1.5.2 Locating the Misspellings --- Round One
+First, I have to locate the rows where something is mispelled. I will subset out the rows that are misspelled.
+```{r}
+for (i in 1:nrow(RevEn)){
+bad <- hunspell(RevEn$Review[i],ignore=c(en_stats,custdict))
+if(length(bad[[1]])>0) {
+RevEn$Spelling[i] <- 1
+}
+}
+RevEn1 <- RevEn[which(RevEn$Spelling==1),]
+RevEn3 <- RevEn[which(RevEn$Spelling==0),]
+```
+
+\  
+
+#### 1.5.3 Correction --- Round One
+Now I will do the actual correction. For simplicity purpose, I will do this in a loop with Regex.
+```{r}
+## Correcting the Misspellings
+for(k in 1:nrow(RevEn1)){
+bad <- hunspell(RevEn1$Review[k],ignore=c(en_stats,custdict))
+df <- data.frame(orig=bad[[1]],new=NA)
+corr <- hunspell_suggest(bad[[1]])
+for (i in 1:length(corr)){
+  df[i,2]<- corr[[i]][1]
+}
+for (z in 1:length(corr)){
+RevEn1$Review[k] <- sub(paste0('\\<',df[z,1],'\\>'),df[z,2],RevEn1$Review[k])
+}
+}
+```
+
+\  
+
+#### 1.5.4 Locating the Misspellings --- Round Two
+Is all the misspelled word corrected. I am not so certain (Hunspell can be unreliable sometimes). I will check again.
+```{r}
+RevEn1$Spelling <- 0
+for (i in 1:nrow(RevEn1)){
+  bad <- hunspell(RevEn1$Review[i],ignore=c(en_stats,custdict))
+  if(length(bad[[1]])>0) {
+    RevEn1$Spelling[i] <- 1
+  }
+}
+RevEn2 <- RevEn1[which(RevEn1$Spelling==1),]
+RevEn4  <- RevEn1[which(RevEn1$Spelling==0),]
+RevEn <- rbind(RevEn3,RevEn4)
+rm(RevEn3,RevEn4,RevEn1)
+```
+It seems like there are Emojis in our App Reviews Text. We don't want them, They may give us additional troubles. I would like them gone once and for all:
+```{r}
+RevEn2$Review <- gsub("[^\x01-\x7F]", "", RevEn2$Review)
+```
+
+\  
+
+#### 1.5.5 Locating the Misspellings --- Round Three
+After I got rid of the Emjois,I will now check how many rows contain words mispelled.
+```{r}
+RevEn2$Spelling <- 0
+for (i in 1:nrow(RevEn2)){
+  bad <- hunspell(RevEn2$Review[i],ignore=c(en_stats,custdict))
+  if(length(bad[[1]])>0) {
+    RevEn2$Spelling[i] <- 1
+  }
+}
+RevEn5 <- RevEn2[which(RevEn2$Spelling==0),]
+RevEn <- rbind(RevEn,RevEn5)
+RevEn6 <- RevEn2[which(RevEn2$Spelling==1),]
+rm(RevEn5,RevEn2)
+```
+It seems like there are still 10 rows containing words that are mispelled. 
+
+\  
+
+#### 1.5.6 Correction --- Round Three
+Now I will correct these ten rows.
+```{r}
+for(k in 1:nrow(RevEn6)){
+  bad <- hunspell(RevEn6$Review[k],ignore=c(en_stats,custdict))
+  df <- data.frame(orig=bad[[1]],new=NA)
+  corr <- hunspell_suggest(bad[[1]])
+  for (i in 1:length(corr)){
+    df[i,2]<- corr[[i]][1]
+  }
+  for (z in 1:length(corr)){
+    RevEn6$Review[k] <- sub(paste0('\\<',df[z,1],'\\>'),df[z,2],RevEn6$Review[k])
+  }
+}
+RevEn <- rbind(RevEn,RevEn6)
+rm(RevEn6)
+```
+And finally we have our English Reviews (without typos)-- RevEn.
+
+## 2. Descriptive Analysis--Word Cloud Visuals
+Now that we have the reviews data cleaned, we can create some useful word clouds.
+\  
+
+### 2.1 Some Additional Cleaning
+Before we do anything with our data, all the contractions (i.e. Don't, Doesn't..) has to be replaced. In addition, extra white space and punctuations should also be removed. At this point of time, we are not going to do word stemming on all 17705 rows of data. However, we will remove the stop words. In addition to the words already included in the English stop words dictionary, we also added in some high frequency but meaningless terms that would appear in our dataset.
+```{r}
+library(tm)
+library(qdap)
+library(wordcloud)
+library(plotrix)
+library(tidytext)
+library(wordcloud2)
+
+RevEn$Review <- gsub("’","'",RevEn$Review)
+RevEn$Review <- replace_contraction(RevEn$Review)
+RevEn$Review <- stripWhitespace(RevEn$Review)
+RevEn$Review <- removePunctuation(RevEn$Review)
+RevEn$Review <- tolower(RevEn$Review)
+custStop <- c("using","can","also",
+              "phone","phones","now",
+              "will","use","home","opener",
+              "door","doors","app","myq",
+              "liftmaster","chamberlain",
+              "andriod","ios","garage",stopwords("english"))
+RevEn$Review <- removeWords(RevEn$Review, custStop)
+```
+
+\  
+
+### 2.2 Word Stemming
+As we mentioned, we are not going to do word stemming on all of our data. However, we will reduce the most frequent words to its root form so that we could generate useful insights from our word clouds.
+```{r}
+RevEn$Review <- gsub("\\<works\\>|\\<work\\>|\\<working\\>|\\<worked\\>","work",RevEn$Review)
+RevEn$Review <- gsub("\\<open\\>|\\<opened\\>|\\<opens\\>|\\<opening\\>","open",RevEn$Review)
+RevEn$Review <- gsub("\\<time\\>|\\<times\\>","time",RevEn$Review)
+RevEn$Review <- gsub("\\<install\\>|\\<installed\\>","install",RevEn$Review)
+RevEn$Review <- gsub("\\<close\\>|\\<closed\\>|\\<closing\\>","close",RevEn$Review)
+RevEn$Review <- gsub("\\<notification\\>|\\<notifications\\>","notification",RevEn$Review)
+RevEn$Review <- gsub("\\<need\\>|\\<needs\\>","need",RevEn$Review)
+RevEn$Review <- gsub("\\<alert\\>|\\<alerts\\>","alert",RevEn$Review)
+RevEn$Review <- gsub("\\<remote\\>|\\<remotely\\>","remote",RevEn$Review)
+RevEn$Review <- gsub("\\<ive\\>","i have",RevEn$Review)
+```
+
+\  
+
+### 2.3 The Most Frequent Words Word Cloud
+After some simple data manipulation, we can create our first word cloud.
+```{r}
+frequency <- freq_terms(
+  RevEn$Review, 
+  top = 75, 
+  at.least = 2, 
+  stopwords = stopwords("english")
+)
+frequency <- as.data.frame(frequency)
+WC <- wordcloud2(frequency, color = "random-dark", backgroundColor = "#edebda")
+WC
+```
+\  
+
+From the word cloud above, we can make some interesting hypothesis:
+
+* In general, the users are satisfied with the app. We should expect an average rating of 3-5 on a 5 point scale.
+* Alert and Notification popped out in the most frequent words. From our analysis on the TSC data, we concluded that Chamberlain's customers were having problems with their alerts/notification setups. This finding tells us that Chamberlain's customers were expressing their dissaointment with the alerts/notification in the app review. 
+* WiFi and Connect also popped out in the most frequent terms. From our analysis on the TSC data, we concluded that the app users were having problems connecting to the WIFI from February to August last year. It seems like Chamberlain has heard their user's voices and the occurence of Wifi problems is  now gradually decreasing.
+* Integration and Gooogle also popped out in the most frequent terms. From our TSC analysis, we observed a growing trend of users complaining about how much they have to pay in addition if they want their myq apps/openers to be connected to third party devices like Google Home. Users were also complaining how diffficult it is to actaully set up the app so that it can be connected to ifttt or Google Home. Therefore, it is not a surprise we see Integration and Google in the most frequent terms.
+
+\  
+
+### 2.4 Commonality/ Dissimilarity Cloud
+Another approach we took while analyzing the data is to devide the dataset into multiple groups according to product type(Chamberlain vs. Liftmaster vs. Merlin) or app OS (iOS  vs Android).
+
+#### 2.4.1 Android vs.iOS
+##### 2.4.1.1 Commonailty Clouds
+We first created a commonality cloud featuring the most frequent terms that appear in the both iOS reviews and Android Reviews.
+```{r}
+RevEn1 <- RevEn
+RevEn1$AppName <- recode_factor(RevEn1$AppName, "LiftMaster Android"="Android", "Chamberlain Android"="Android",
+                                         "Merlin Android"="Android", "LiftMaster iOS"="iOS", "Chamberlain iOS"="iOS",
+                                         "Merlin iOS"="iOS")
+
+RevEn1_And <- RevEn1[which(RevEn1$AppName=="Android"),6]
+RevEn1_ios <- RevEn1[which(RevEn1$AppName=="iOS"),6]
+all_and <- paste(RevEn1_And$Review,collapse=" ")
+all_ios <- paste(RevEn1_ios$Review,collapse=" ")
+all_rev <- c(all_and,all_ios)
+all_rev <- VectorSource(all_rev)
+all_rev <- VCorpus(all_rev)
+all_rev <- tm_map(all_rev, stripWhitespace)
+all_rev <- TermDocumentMatrix(all_rev)
+all_rev <- as.matrix(all_rev)
+all_rev <- as.data.frame(all_rev)
+all_rev_same <- all_rev[which(all_rev$`1`>=1 & all_rev$`2`>=1),]
+all_rev_same$count <- all_rev_same$`1`+all_rev_same$`2`
+all_rev_same$word <- rownames(all_rev_same)
+all_rev_same <- all_rev_same[,c(4,3)]
+rownames(all_rev_same) <- 1:nrow(all_rev_same)
+freq_same <- all_rev_same %>% arrange(desc(count))
+freq_same <- freq_same[1:80,]
+CC1 <- wordcloud2(freq_same, color = "random-dark", backgroundColor = "#edebda")
+CC1
+```
+\  
+
+* The commonality word cloud is very similar to the frequent term cloud we made in our first step. This pattern led us into beliving iOS users might be facing the same technical issues experienced by the Android users. The difference between iOS reviews and Android reviews might be minimal.
+
+\  
+
+##### 2.4.1.2 Polarized pyramid Plot
+To better understand the difference between the iOS and Android user group, we created a pyramid plot contrasting the frequency of words that appeared in both set of reviews.
+```{r,message=FALSE,warning=FALSE,out.width="190%",out.height="190%",eval=FALSE}
+all_rev_pyr <- all_rev
+colnames(all_rev_pyr) <- c("Android","iOS")
+all_rev_pyr$word <- rownames(all_rev_pyr)
+rownames(all_rev_pyr) <- 1:nrow(all_rev_pyr)
+all_rev_pyr <- all_rev_pyr %>% filter_all(all_vars(.>0))
+all_rev_pyr$diff <- all_rev_pyr$Android - all_rev_pyr$iOS
+all_rev_pyr <- all_rev_pyr %>% top_n(80, wt = diff) %>% arrange(desc(diff))
+all_rev_pyr <-all_rev_pyr[,c(3,1,2,4)]
+pyramid.plot(
+  all_rev_pyr$Android, 
+  all_rev_pyr$iOS,
+  labels = all_rev_pyr$word, 
+  top.labels = c("Android", "Words", "iOS"), 
+  main = "Words in Common", 
+  unit = NULL,
+  gap = 800,
+  space=0.5,
+  labelcex=0.6
+)
+```
+![](/Users/ruoningwang/Downloads/Miami University Analytics Practicum Deliverables/pyr.png)
+
+\  
+
+* From the plot, we can tell frequency of the most-frequent words for iOS and Android reviews is simililar. Although much more Android users mentioned the app works great when compared to the number of iOS users who mentioned the same thing, the difference might be simply due to the fact that there are far more Android reviews than iOS reviews.
+
+\  
+
+##### 2.4.1.3 Comparison Cloud
+We then created a comparison cloud contrasting the most frequent terms appearing in the iOS reviews to the most frequent terms appearing in the Android Reviews.
+```{r,out.width="150%",out.height="140%"}
+all_rev2 <- c(all_and,all_ios)
+all_rev2 <- VectorSource(all_rev2)
+all_rev2 <- VCorpus(all_rev2)
+all_rev2 <- tm_map(all_rev2, stripWhitespace)
+all_rev2 <- TermDocumentMatrix(all_rev2)
+colnames(all_rev2) <- c("Android","iOS")
+all_rev2 <- as.matrix(all_rev2)
+
+par(mfrow=c(1,1))
+comparison.cloud(all_rev2 ,random.order=FALSE, colors=c("indianred3","lightsteelblue3"),max.words=80,scale=c(1,0.8),title.size =1.5)
+```
+\  
+
+* From the comparison cloud we can tell its the Android users that are praising the app for its good performance. iOS users care more about making the app compatible with Siri and touchid while Android users care more about the notifications and alerts, as well as connecting the app to ifttt and Google Home.
+
+\  
+
+##### 2.4.1.4 App Rating
+After visualizing the frequent terms in the app review dataset, we would also like to see how the actual app rating changed over time. We first grouped the dataset into iOS and Android user groups. We then aggregated the average ratings by weeks and plotted the trend over time.
+```{r,message=FALSE,warning=FALSE,out.width="110%",out.height="100%",}
+library(xts)
+RevSc <- RevEn[,c(5,2,4)]
+RevSc$AppName <- recode_factor(RevSc$AppName, "LiftMaster Android"="Andriod", "Chamberlain Android"="Andriod",
+                               "Merlin Android"="Andriod", "LiftMaster iOS"="iOS", "Chamberlain iOS"="iOS",
+                               "Merlin iOS"="iOS")
+cat <- unlist(unique(RevSc$AppName))
+RevSc$`Review Rating (1-5)` <- as.numeric(RevSc$`Review Rating (1-5)`)
+
+ms_0 <- {}
+for (i in 1:length(cat)) {
+  ms <- RevSc[which(RevSc$AppName==cat[i]),]
+  ms <- xts(x=ms[,-1],order.by=ms$`Review Date`)
+  ms <- merge(ms,zoo(NULL,seq(as.Date("2016/01/01"),as.Date("2018/12/09"),by="day")),all=TRUE)
+  ms$Review.Rating..1.5.[which(is.na(ms$Review.Rating..1.5.))] <-0
+  ep <- endpoints(ms, on = "weeks")
+  ms <- period.apply(ms[,"Review.Rating..1.5."],INDEX=ep,mean)
+  cr<- coredata(ms)
+  index <- index(ms)
+  ms <- data.frame(date=index,AvgScore=cr)
+  ms$App <- cat[i]
+  assign(paste("ms",i,sep="_"),rbind(get(paste("ms",i-1,sep="_")),ms))
+}
+RevSc <- ms_2
+colnames(RevSc) <- c("Date","Score","AppName")
+RevSc$Date <- as.Date(RevSc$Date)
+
+ggplot()+geom_line(aes(x=Date,y=Score,color=AppName),data=RevSc,alpha=0.3)+
+  geom_smooth(aes(x=Date,y=Score,color=AppName),data=RevSc,method="loess",se=F,span=0.5)+
+  scale_color_manual (labels=c("Android","iOS"),values=c("#088edb","#dd3e1f"))+
+  theme_bw()+scale_x_date(date_breaks = "1 month", date_labels ="%b %Y")+
+  ggtitle("App Rating Comparison Over Time--Android vs. iOS")+ ylab("App Ratings")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.title=element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),legend.position="top")
+```
+\  
+
+* From the plot we can clearly tell that while the rating for the Android app remained constant overtime, the weekly average rating for the iOS app started to drop around August 2017. Interestingly, this is the exact same time when Chamberlain's customers started having problems setting up their MyQ devices. Refering back to our TSC analysis, this is the time when Chamberlain released ios app version 3.86. Therefore, based on this pattern, we would conclude something in the ver3.86 app must have made it a lot more complicated for customers to set up their MyQ devices. Similarily, starting from Jun 2018, the app rating for the iOS version started increasing. It seems like Chamberlain made some favorable changes to their iOS app when Version 3.109 is released.
+* We also attached a table summarizing the min,max, median of the app ratings.
+```{r}
+sumar <- RevSc %>% group_by(AppName) %>% summarize(MinScore=min(Score),FirstQ=quantile(Score,0.25),MedScore=median(Score),AvgScore=mean(Score),
+                                                   ThirdQ=quantile(Score,0.75),MaxScore=max(Score))
+```
+```{r,echo=FALSE}
+knitr::kable(sumar)%>%
+  kable_styling(font_size = 7)
+```
+
+\  
+
+#### 2.4.2 LiftMaster vs.Chamberlain vs.Merlin
+##### 2.4.2.1 Commonailty Clouds
+We first created a commonality cloud featuring the most frequent terms that appear in all three groups.
+```{r}
+RevEn2 <- RevEn
+RevEn2$AppName <- recode_factor(RevEn2$AppName, "LiftMaster Android"="LiftMaster", "Chamberlain Android"="Chamberlain","Merlin Android"="Merlin", "LiftMaster iOS"="LiftMaster", "Chamberlain iOS"="Chamberlain","Merlin iOS"="Merlin")
+
+RevEn2_Chm <- RevEn2[which(RevEn2$AppName=="Chamberlain"),6]
+RevEn2_Lfm <- RevEn2[which(RevEn2$AppName=="LiftMaster"),6]
+RevEn2_Mln <- RevEn2[which(RevEn2$AppName=="Merlin"),6]
+
+all_Chm <- paste(RevEn2_Chm$Review,collapse=" ")
+all_Lfm <- paste(RevEn2_Lfm$Review,collapse=" ")
+all_Mln <- paste(RevEn2_Mln$Review,collapse=" ")
+
+all_rev3 <- c(all_Chm,all_Lfm,all_Mln)
+all_rev3 <- VectorSource(all_rev3)
+all_rev3 <- VCorpus(all_rev3)
+all_rev3 <- tm_map(all_rev3, stripWhitespace)
+all_rev3 <- TermDocumentMatrix(all_rev3)
+all_rev3 <- as.matrix(all_rev3)
+all_rev3 <- as.data.frame(all_rev3)
+all_rev_same3 <- all_rev3[which(all_rev3$`1`>=1 & all_rev3$`2`>=1 & all_rev3$`3`>=1),]
+all_rev_same3$count <- all_rev_same3$`1`+all_rev_same3$`2`+all_rev_same3$`3`
+all_rev_same3$word <- rownames(all_rev_same3)
+all_rev_same3 <- all_rev_same3[,c(5,4)]
+rownames(all_rev_same3) <- 1:nrow(all_rev_same3)
+freq_same3 <- all_rev_same3 %>% arrange(desc(count))
+freq_same3 <- freq_same3[1:80,]
+CC2 <- wordcloud2(freq_same3, color = "random-dark", backgroundColor = "#edebda")
+CC2
+```
+ 
+ \  
+ 
+##### 2.4.2.2 Comparison Cloud
+We then created a comparison cloud contrasting the most frequent terms appearing in the Chamberlain app reviews to the most frequent terms appearing in the LiftMaster Reviews.
+```{r,out.width="200%",out.height="200%"}
+all_rev4 <- c(all_Chm,all_Lfm)
+all_rev4 <- VectorSource(all_rev4)
+all_rev4 <- VCorpus(all_rev4)
+all_rev4 <- tm_map(all_rev4, stripWhitespace)
+all_rev4 <- TermDocumentMatrix(all_rev4)
+colnames(all_rev4) <- c("Chamberlain","Liftmaster")
+all_rev4 <- as.matrix(all_rev4)
+
+par(mfrow=c(1,1))
+comparison.cloud(all_rev4 ,random.order=FALSE, colors=c("indianred3","lightsteelblue3"),max.words=160,scale=c(1,0.8),title.size =1.5)
+```
+\   
+
+* From the comparison cloud, we can tell that users of the Chamberlain App enjoyed a better user experience than users of the LiftMaster App. Terms like "annoying" ,"nothing","happens","problem" are all associated with the Liftmaster App while terms such as "great","useful","good","reliable" are associated with the Chamberlain App. Users of both apps asked for more instructions/guidance on how to set up the app. Users of the Chamberlain App are having problems linking the App to third party devices while users of the LiftMaster App are having issues related to connectivity,password, app not showing properly. 
+
+\  
+
+##### 2.4.2.3 App Rating
+As usual, we would also like to see how the actual app rating for different brand of apps changed over time. 
+We ignored the Merlin Apps because we only have 45 observations related to that brand.
+```{r,message=FALSE,warning=FALSE,out.width="110%",out.height="100%",}
+RevSc2 <- RevEn[,c(5,2,4)]
+RevSc2$AppName <- recode_factor(RevSc2$AppName, "LiftMaster Android"="LiftMaster", "Chamberlain Android"="Chamberlain","Merlin Android"="Merlin", "LiftMaster iOS"="LiftMaster", "Chamberlain iOS"="Chamberlain","Merlin iOS"="Merlin")
+RevSc2 <- RevSc2[which(RevSc2$AppName!="Merlin"),]
+  
+cat <- unlist(unique(RevSc2$AppName))
+RevSc2$`Review Rating (1-5)` <- as.numeric(RevSc2$`Review Rating (1-5)`)
+ms_0 <- {}
+for (i in 1:length(cat)) {
+  ms <- RevSc2[which(RevSc2$AppName==cat[i]),]
+  ms <- xts(x=ms[,-1],order.by=ms$`Review Date`)
+  ms <- merge(ms,zoo(NULL,seq(as.Date("2016/01/01"),as.Date("2018/12/09"),by="day")),all=TRUE)
+  ms$Review.Rating..1.5.[which(is.na(ms$Review.Rating..1.5.))] <-0
+  ep <- endpoints(ms, on = "weeks")
+  ms <- period.apply(ms[,"Review.Rating..1.5."],INDEX=ep,mean)
+  cr<- coredata(ms)
+  index <- index(ms)
+  ms <- data.frame(date=index,AvgScore=cr)
+  ms$App <- cat[i]
+  assign(paste("ms",i,sep="_"),rbind(get(paste("ms",i-1,sep="_")),ms))
+}
+RevSc2 <- ms_2
+colnames(RevSc2) <- c("Date","Score","AppName")
+RevSc2$Date <- as.Date(RevSc2$Date)
+
+ggplot()+geom_line(aes(x=Date,y=Score,color=AppName),data=RevSc2,alpha=0.3)+
+  geom_smooth(aes(x=Date,y=Score,color=AppName),data=RevSc2,method="loess",se=F,span=0.5)+
+  scale_color_manual (labels=c("LiftMaster","Chamberlain"),values=c("#088edb","#dd3e1f"))+
+  theme_bw()+scale_x_date(date_breaks = "1 month", date_labels ="%b %Y")+
+  ggtitle("App Rating Comparison Over Time--LiftMaster vs. Chamberlain")+ ylab("App Ratings")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.title=element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major.x = element_blank(),
+        plot.title = element_text(size=18, hjust=.5),legend.position="top")
+```
+\  
+
+* The average rating of the Chambelain App has been steadily and slowly decreasing. In our opinion, the decrease is natural. As more and more customers are using Chamberlain's app, the possibilty that one or more users are not satisfied with the performance of the app will also increase. We think Chamberlain is actually doing a pretty good job maintaining their Chamberlain app. 
+
+* From August 2016 to May 2017, the average app rating for the LiftMaster App dropped from 4.3 to 3.0. It seems like there was a major problem going on with the LiftMaster App during that period of time. Chamberlain resolved the issue (but not in a timely manner), and the app rating increased back to 4.0.
+
+
+
